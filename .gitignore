@@ -1,0 +1,17 @@
+# Node
+node_modules/
+.env
+
+# Rust / Soroban
+contract/target/
+.soroban
+.stellar
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.kotlin/
+*.iml
+.idea/

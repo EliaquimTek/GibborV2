@@ -1,0 +1,75 @@
+version: 2
+name: gibbor-security-indexer
+description: Indexer for GIBBOR security system events on Soroban
+namespace: gibbor
+
+sources:
+  - name: soroban-mainnet
+    type: soroban
+    network: mainnet
+    # Alternatively use testnet for development
+    # network: testnet
+
+models:
+  - name: PanicAlertEvent
+    description: Event triggered when a user activates panic alert
+    schema:
+      evidence_hash: string
+      location: string
+      user_id: string
+      timestamp: uint64
+      transaction_hash: string
+      ledger_sequence: uint32
+
+indexings:
+  - name: panic-alert-indexer
+    description: Indexes PanicAlert events from GIBBOR smart contract
+    source: soroban-mainnet
+    # Replace with actual GIBBOR contract address on Soroban
+    contract_address: "CDOLLAR...GIBBOR"  # Example format, replace with real contract ID
+    event_filter:
+      - event_name: PanicAlert
+        # Optional: filter by specific topics if needed
+        # topics: ["PanicAlert"]
+    mapping:
+      type: sql
+      sql: |
+        INSERT INTO PanicAlertEvent (
+          evidence_hash,
+          location,
+          user_id,
+          timestamp,
+          transaction_hash,
+          ledger_sequence
+        ) VALUES (
+          CAST(event.data->>'evidence_hash' AS STRING),
+          CAST(event.data->>'location' AS STRING),
+          CAST(event.data->>'user_id' AS STRING),
+          CAST(event.data->>'timestamp' AS UINT64),
+          event.transaction_hash,
+          event.ledger_sequence
+        );
+
+sinks:
+  - name: webhook-sink
+    type: webhook
+    url: http://localhost:3000/webhook/goldsky  # Will be updated with actual domain
+    method: POST
+    headers:
+      Content-Type: application/json
+      # Add authentication header if needed
+      # Authorization: Bearer ${GOLDSKY_WEBHOOK_SECRET}
+    batch_size: 1
+    flush_interval: 1s  # Send events immediately for real-time alerts
+    retry_config:
+      max_retries: 5
+      backoff_factor: 2
+      max_interval: 60s
+
+  # Optional: Add database sink for local persistence
+  - name: postgres-sink
+    type: postgres
+    connection_string: ${POSTGRES_CONNECTION_STRING}
+    table_name: panic_alert_events
+    batch_size: 100
+    flush_interval: 10s
