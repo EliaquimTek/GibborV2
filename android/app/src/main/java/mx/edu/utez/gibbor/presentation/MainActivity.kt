@@ -13,7 +13,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.animation.PathInterpolator
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
@@ -21,6 +23,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.crossmint.kotlin.compose.CrossmintSDKProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,9 +101,10 @@ class MainActivity : ComponentActivity(), MainScreenController {
 
     // ─── Auth state (separado de UI) ──────────────────────────────────────
 
-    @Volatile override var isAuthenticated = false
+    // Respaldado por estado de Compose para que la UI cambie de Onboarding a Inicio al iniciar sesión.
+    override var isAuthenticated by mutableStateOf(false)
         private set
-    override var authenticatedEmail = ""
+    override var authenticatedEmail by mutableStateOf("")
         private set
 
     // ─── Contexto de sesión accesible desde receivers ─────────────────────
@@ -174,7 +178,24 @@ class MainActivity : ComponentActivity(), MainScreenController {
     // ─── Lifecycle ────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen().setOnExitAnimationListener { splash ->
+            // Salida: el logo crece 1 → 1.08 mientras el splash se desvanece (300 ms).
+            val exitEasing = PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
+            splash.iconView.animate()
+                .scaleX(1.08f)
+                .scaleY(1.08f)
+                .setDuration(300L)
+                .setInterpolator(exitEasing)
+                .start()
+            splash.view.animate()
+                .alpha(0f)
+                .setDuration(300L)
+                .setInterpolator(exitEasing)
+                .withEndAction { splash.remove() }
+                .start()
+        }
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter

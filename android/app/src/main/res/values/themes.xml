@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Gibbor" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#070A24</item>
-        <item name="android:navigationBarColor">#070A24</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:colorAccent">#2EC4E6</item>
+    <style name="Theme.Gibbor" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/gibbor_background</item>
+        <item name="android:colorAccent">#0A63F5</item>
+    </style>
+
+    <!-- Splash nativo (core-splashscreen): logo dentro de un círculo sobre el fondo de la app -->
+    <style name="Theme.Gibbor.Starting" parent="Theme.SplashScreen.IconBackground">
+        <item name="windowSplashScreenBackground">@color/gibbor_background</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/gibbor_surface</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.Gibbor</item>
     </style>
 </resources>

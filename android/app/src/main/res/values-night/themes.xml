@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.Gibbor" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/gibbor_background</item>
+        <item name="android:colorAccent">#4D8DFF</item>
+    </style>
+</resources>
