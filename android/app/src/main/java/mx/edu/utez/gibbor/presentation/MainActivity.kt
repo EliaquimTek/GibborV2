@@ -11,6 +11,8 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -74,6 +76,12 @@ class MainActivity : ComponentActivity(), MainScreenController {
         private set
     override var triggerCounter by mutableIntStateOf(0)
         private set
+    override var demoTriggerCounter by mutableIntStateOf(0)
+        private set
+    override var lastDemoKey by mutableStateOf("")
+        private set
+    override var isDemoActive by mutableStateOf(false)
+    private var lastDemoTriggerAtMillis = 0L
 
     // ─── Bluetooth state ──────────────────────────────────────────────────
 
@@ -209,6 +217,47 @@ class MainActivity : ComponentActivity(), MainScreenController {
         logText += "[$time] $message\n"
     }
 
+    override fun clearLog() {
+        logText = ""
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val demoKeyCodes = setOf(
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_SPACE,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            KeyEvent.KEYCODE_CAMERA,
+            KeyEvent.KEYCODE_PAGE_UP,
+            KeyEvent.KEYCODE_PAGE_DOWN,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+        )
+        if (isDemoActive && event.keyCode in demoKeyCodes) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                lastDemoKey = KeyEvent.keyCodeToString(event.keyCode)
+                val now = SystemClock.elapsedRealtime()
+                if (lastDemoTriggerAtMillis == 0L || now - lastDemoTriggerAtMillis >= 1500L) {
+                    lastDemoTriggerAtMillis = now
+                    demoTriggerCounter++
+                }
+            }
+            if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun startSession(email: String) {
         isAuthenticated = true
         authenticatedEmail = email
@@ -314,7 +363,7 @@ class MainActivity : ComponentActivity(), MainScreenController {
 
     // ─── Audio / video recording ──────────────────────────────────────────
 
-    override fun startAudioRecording(incidentId: String) {
+    override fun startAudioRecording(incidentId: String, useFrontCamera: Boolean) {
         if (!hasAudioPermission()) {
             appendLog("AUDIO: Missing RECORD_AUDIO permission")
             return
@@ -333,9 +382,11 @@ class MainActivity : ComponentActivity(), MainScreenController {
                 val svcIntent = Intent(this, RecordingService::class.java).apply {
                     action = RecordingService.ACTION_START
                     putExtra(RecordingService.EXTRA_INCIDENT_ID, incidentId)
+                    putExtra(RecordingService.EXTRA_USE_FRONT_CAMERA, useFrontCamera)
                 }
                 ContextCompat.startForegroundService(this, svcIntent)
-                appendLog("VIDEO: Starting video recording...")
+                if (useFrontCamera) appendLog("VIDEO: Starting video recording (front camera)...")
+                else appendLog("VIDEO: Starting video recording...")
             } else {
                 appendLog("VIDEO: No CAMERA permission — audio only")
             }

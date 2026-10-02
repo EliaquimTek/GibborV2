@@ -15,6 +15,9 @@ interface MainScreenController {
     val statusText: String
     val logText: String
     val triggerCounter: Int
+    val demoTriggerCounter: Int
+    val lastDemoKey: String
+    var isDemoActive: Boolean
     val isRecording: Boolean
     val isAuthenticated: Boolean
     val authenticatedEmail: String
@@ -24,6 +27,7 @@ interface MainScreenController {
 
     // ─── Sesión / log ─────────────────────────────────────────────────────
     fun appendLog(message: String)
+    fun clearLog()
     fun startSession(email: String)
 
     // ─── Permisos ─────────────────────────────────────────────────────────
@@ -41,7 +45,7 @@ interface MainScreenController {
     suspend fun sendEvidenceToBackend(backendUrl: String, incidentId: String, mediaType: String, mediaHash: String): Boolean
 
     // ─── Grabación ────────────────────────────────────────────────────────
-    fun startAudioRecording(incidentId: String)
+    fun startAudioRecording(incidentId: String, useFrontCamera: Boolean = false)
     fun stopAudioRecording(): String?
 
     // ─── Bluetooth ────────────────────────────────────────────────────────

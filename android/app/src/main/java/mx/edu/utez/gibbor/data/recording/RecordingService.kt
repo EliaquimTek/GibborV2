@@ -8,7 +8,9 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -28,6 +30,7 @@ class RecordingService : Service() {
         const val ACTION_START      = "mx.edu.utez.gibbor.START_RECORDING"
         const val ACTION_STOP       = "mx.edu.utez.gibbor.STOP_RECORDING"
         const val EXTRA_INCIDENT_ID = "incident_id"
+        const val EXTRA_USE_FRONT_CAMERA = "use_front_camera"
         const val BROADCAST_DONE    = "mx.edu.utez.gibbor.RECORDING_DONE"
         const val EXTRA_FILE_PATH   = "file_path"
         const val EXTRA_SHA256      = "sha256"
@@ -53,7 +56,10 @@ class RecordingService : Service() {
                     ?: run { stopSelf(); return START_NOT_STICKY }
                 currentIncidentId = id
                 startForeground(NOTIFICATION_ID, buildNotification())
-                startRecording(id)
+                startRecording(
+                    id = id,
+                    useFront = intent.getBooleanExtra(EXTRA_USE_FRONT_CAMERA, false),
+                )
             }
             ACTION_STOP -> {
                 activeRecording?.stop()
@@ -64,24 +70,63 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startRecording(id: String) {
+    private fun startRecording(id: String, useFront: Boolean) {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
                 val cameraProvider = future.get()
 
                 val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(Quality.HD))
+                    .setQualitySelector(
+                        QualitySelector.from(
+                            Quality.HD,
+                            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
+                        )
+                    )
                     .build()
 
                 val videoCapture = VideoCapture.withOutput(recorder)
 
+                val useFrontCamera = useFront &&
+                    cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)
+                val cameraSelector = if (useFrontCamera) {
+                    CameraSelector.DEFAULT_FRONT_CAMERA
+                } else {
+                    CameraSelector.DEFAULT_BACK_CAMERA
+                }
+
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    ProcessLifecycleOwner.get(),
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    videoCapture
-                )
+                val previewProvider = if (useFrontCamera) {
+                    CameraPreviewHolder.surfaceProvider
+                } else {
+                    null
+                }
+                if (previewProvider != null) {
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewProvider)
+                    }
+                    try {
+                        cameraProvider.bindToLifecycle(
+                            ProcessLifecycleOwner.get(),
+                            cameraSelector,
+                            preview,
+                            videoCapture,
+                        )
+                    } catch (_: Exception) {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                            ProcessLifecycleOwner.get(),
+                            cameraSelector,
+                            videoCapture,
+                        )
+                    }
+                } else {
+                    cameraProvider.bindToLifecycle(
+                        ProcessLifecycleOwner.get(),
+                        cameraSelector,
+                        videoCapture,
+                    )
+                }
 
                 val videoDir = File(filesDir, "evidence")
                 videoDir.mkdirs()

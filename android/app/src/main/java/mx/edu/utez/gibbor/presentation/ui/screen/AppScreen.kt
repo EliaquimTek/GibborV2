@@ -1,63 +1,32 @@
 package mx.edu.utez.gibbor.presentation.ui.screen
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import mx.edu.utez.gibbor.BuildConfig
 import mx.edu.utez.gibbor.presentation.MainScreenController
-import mx.edu.utez.gibbor.presentation.ui.components.GibborCard
-import mx.edu.utez.gibbor.presentation.ui.components.GibborCollapsible
-import mx.edu.utez.gibbor.presentation.ui.components.GibborDangerButton
-import mx.edu.utez.gibbor.presentation.ui.components.GibborOutlinedButton
-import mx.edu.utez.gibbor.presentation.ui.components.GibborPrimaryButton
-import mx.edu.utez.gibbor.presentation.ui.components.GibborSectionLabel
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborBg
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborCharcoal
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborDark
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborGreen
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborMid
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborNavy
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborRed
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborRedBorder
-import mx.edu.utez.gibbor.presentation.ui.theme.GibborRedLight
+import mx.edu.utez.gibbor.presentation.ui.components.GibborBackground
+import mx.edu.utez.gibbor.presentation.ui.components.GibborBottomBar
+import mx.edu.utez.gibbor.presentation.ui.components.GibborTab
 
 @Composable
 fun AppScreen(controller: MainScreenController) {
@@ -69,6 +38,12 @@ fun AppScreen(controller: MainScreenController) {
     var authStatus by remember { mutableStateOf("No autenticado") }
     var busy by remember { mutableStateOf(false) }
     var lastHandledTrigger by remember { mutableIntStateOf(0) }
+    var lastHandledDemoTrigger by remember { mutableIntStateOf(controller.demoTriggerCounter) }
+    var demoExecutionId by remember { mutableIntStateOf(0) }
+    var demoStartIncidentPreview by remember { mutableStateOf("Ninguno") }
+    var demoStartChainStatus by remember { mutableStateOf("") }
+    var demoStartLogLength by remember { mutableIntStateOf(0) }
+    var dismissedDemoExecutionId by remember { mutableIntStateOf(0) }
     var incidentPreview by remember { mutableStateOf("Ninguno") }
     var onChainStatus by remember { mutableStateOf("") }
 
@@ -76,7 +51,7 @@ fun AppScreen(controller: MainScreenController) {
      * Flujo completo: ubicación → draft → backend → on-chain
      * authStatus se usa SOLO para display. isAuthenticated controla el flujo.
      */
-    suspend fun createAndSendIncident(source: String) {
+    suspend fun createAndSendIncident(source: String, useFrontCamera: Boolean) {
         if (!controller.hasAudioPermission() || !controller.hasCameraPermission()) {
             controller.appendLog("$source -> Missing recording permissions. Grant them and try again.")
             controller.requestBluetoothPermissions()
@@ -158,7 +133,7 @@ fun AppScreen(controller: MainScreenController) {
                 controller.appendLog("$source -> TX confirmed. Starting evidence collection...")
                 controller.lastBackendUrl = backendUrl
                 controller.lastIncidentForEvidence = draft.incidentId
-                controller.startAudioRecording(draft.incidentId)
+                controller.startAudioRecording(draft.incidentId, useFrontCamera)
             }
         } catch (e: Exception) {
             val errorMsg = e.message ?: "Unknown error"
@@ -169,6 +144,33 @@ fun AppScreen(controller: MainScreenController) {
         }
     }
 
+    suspend fun handleHardwareTrigger(source: String, useFrontCamera: Boolean) {
+        if (source != "ESP32" && busy) {
+            controller.appendLog("$source -> busy, trigger ignored")
+            return
+        }
+        if (!controller.isAuthenticated) {
+            controller.appendLog("$source -> authenticate first")
+            return
+        }
+
+        busy = true
+        try {
+            createAndSendIncident(source, useFrontCamera)
+        } catch (e: Exception) {
+            controller.appendLog("$source -> error: " + e.message)
+        } finally {
+            busy = false
+        }
+    }
+
+    fun beginDemoExecution() {
+        demoStartIncidentPreview = incidentPreview
+        demoStartChainStatus = onChainStatus
+        demoStartLogLength = controller.logText.length
+        demoExecutionId++
+    }
+
     // ─── Trigger ESP32 ────────────────────────────────────────────────────
 
     LaunchedEffect(controller.triggerCounter) {
@@ -176,114 +178,90 @@ fun AppScreen(controller: MainScreenController) {
 
         lastHandledTrigger = controller.triggerCounter
 
-        // Usa isAuthenticated (boolean), no authStatus (string de display)
-        if (!controller.isAuthenticated) {
-            controller.appendLog("ESP32 -> authenticate first")
-            return@LaunchedEffect
-        }
+        handleHardwareTrigger("ESP32", useFrontCamera = false)
+    }
 
-        busy = true
-        try {
-            createAndSendIncident("ESP32")
-        } catch (e: Exception) {
-            controller.appendLog("ESP32 -> error: ${e.message}")
-            // isAuthenticated NO se toca
-        } finally {
-            busy = false
+    LaunchedEffect(controller.demoTriggerCounter) {
+        if (controller.demoTriggerCounter == lastHandledDemoTrigger) return@LaunchedEffect
+        lastHandledDemoTrigger = controller.demoTriggerCounter
+        if (!busy) beginDemoExecution()
+        handleHardwareTrigger("REMOTE", useFrontCamera = true)
+    }
+
+    var otpCode by remember { mutableStateOf("") }
+    var otpRequested by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(GibborTab.OPERATIONAL) }
+    var recordingElapsedSeconds by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(controller.isRecording) {
+        if (controller.isRecording) {
+            val recordingStartedAt = System.currentTimeMillis()
+            recordingElapsedSeconds = 0L
+            while (true) {
+                delay(1000)
+                recordingElapsedSeconds = (System.currentTimeMillis() - recordingStartedAt) / 1000
+            }
+        } else {
+            recordingElapsedSeconds = 0L
         }
     }
 
-    // ─── UI State ─────────────────────────────────────────────────────────
+    LaunchedEffect(selectedTab) {
+        controller.isDemoActive = selectedTab == GibborTab.DEMO
+    }
 
-    var otpCode         by remember { mutableStateOf("") }
-    var otpRequested    by remember { mutableStateOf(false) }
-    var configExpanded  by remember { mutableStateOf(false) }
-    var btExpanded      by remember { mutableStateOf(false) }
-    var logExpanded     by remember { mutableStateOf(false) }
+    val onStopRecording: () -> Unit = {
+        val hash = controller.stopAudioRecording()
+        if (hash != null && controller.lastBackendUrl.isNotEmpty() && controller.lastIncidentForEvidence.isNotEmpty()) {
+            controller.appendLog("AUDIO: Anchoring hash on blockchain...")
+            CoroutineScope(Dispatchers.Main).launch {
+                val ok = controller.sendEvidenceToBackend(controller.lastBackendUrl, controller.lastIncidentForEvidence, "audio", hash)
+                if (ok) controller.appendLog("AUDIO: Hash anchored on blockchain")
+                else    controller.appendLog("AUDIO: Error anchoring hash on blockchain")
+            }
+        }
+    }
 
-    val scrollState = rememberScrollState()
-
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = GibborBg
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 20.dp)
-                .verticalScroll(scrollState)
-        ) {
-
-            Spacer(Modifier.height(48.dp))
-
-            // ── Header ──────────────────────────────────────────────────
-
-            Text(
-                "GIBBOR",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Light,
-                letterSpacing = 10.sp,
-                color = GibborNavy
-            )
-            Text(
-                "EMERGENCY SYSTEM",
-                fontSize = 10.sp,
-                letterSpacing = 3.sp,
-                color = GibborMid,
-                fontWeight = FontWeight.Normal
-            )
-
-            Spacer(Modifier.height(36.dp))
-
-            // ── Autenticacion ────────────────────────────────────────
-
-            if (!controller.isAuthenticated) {
-
-                GibborCard {
-                    GibborSectionLabel("Access")
-                    Spacer(Modifier.height(16.dp))
-
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = {
-                            email = it
-                            otpRequested = false
-                            otpCode = ""
-                        },
-                        label = { Text("Institutional email") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    GibborPrimaryButton(
-                        text = "Get wallet",
-                        onClick = {
-                            val code = (100000..999999).random().toString()
-                            otpCode = code
-                            otpRequested = true
-                            controller.appendLog("OTP generated for ${email.trim()}")
-                        },
-                        enabled = email.isNotBlank() && !otpRequested
-                    )
-
-                    if (otpRequested) {
-                        Spacer(Modifier.height(16.dp))
-                        OutlinedTextField(
-                            value = otpCode,
-                            onValueChange = {},
-                            label = { Text("Verification code (6 digits)") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            readOnly = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        GibborPrimaryButton(
-                            text = "Sign in",
-                            onClick = {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets.safeDrawing,
+            bottomBar = {
+                GibborBottomBar(
+                    selectedTab = selectedTab,
+                    onSelectTab = { selectedTab = it },
+                )
+            },
+        ) { innerPadding ->
+            GibborBackground(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                Crossfade(
+                    targetState = selectedTab,
+                    modifier = Modifier.fillMaxSize(),
+                    label = "GIBBOR tabs",
+                ) { tab ->
+                    when (tab) {
+                        GibborTab.OPERATIONAL -> OperationalScreen(
+                            controller = controller,
+                            email = email,
+                            onEmailChange = {
+                                email = it
+                                otpRequested = false
+                                otpCode = ""
+                            },
+                            otpCode = otpCode,
+                            otpRequested = otpRequested,
+                            onRequestOtp = {
+                                val code = (100000..999999).random().toString()
+                                otpCode = code
+                                otpRequested = true
+                                controller.appendLog("OTP generated for ${email.trim()}")
+                            },
+                            onSignIn = {
                                 val norm = email.trim()
                                     .replace("[^a-zA-Z0-9@._-]".toRegex(), "")
                                     .lowercase()
@@ -293,209 +271,49 @@ fun AppScreen(controller: MainScreenController) {
                                     controller.appendLog("Auth: session started as $norm")
                                 }
                             },
-                            enabled = otpRequested && email.isNotBlank()
-                        )
-                    }
-                }
-
-            } else {
-
-                // ── Sesion activa ──────────────────────────────────────
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            "ACTIVE SESSION",
-                            fontSize = 10.sp,
-                            letterSpacing = 1.5.sp,
-                            color = GibborMid
-                        )
-                        Text(
-                            controller.authenticatedEmail,
-                            fontSize = 13.sp,
-                            color = GibborNavy,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(GibborGreen)
-                    )
-                }
-
-                Spacer(Modifier.height(24.dp))
-
-                // ── Accion principal ───────────────────────────────────
-
-                GibborPrimaryButton(
-                    text = if (busy) "Processing..." else "CREATE INCIDENT",
-                    onClick = {
-                        CoroutineScope(Dispatchers.Main).launch {
-                            busy = true
-                            try { createAndSendIncident("MANUAL") }
-                            catch (e: Exception) { controller.appendLog("MANUAL -> error: ${e.message}") }
-                            finally { busy = false }
-                        }
-                    },
-                    enabled = !busy
-                )
-            }
-
-            // ── Grabacion activa ──────────────────────────────────────
-
-            if (controller.isRecording) {
-                Spacer(Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = GibborRedLight),
-                    border = BorderStroke(1.dp, GibborRedBorder)
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(GibborRed)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "RECORDING EVIDENCE",
-                                fontSize = 11.sp,
-                                letterSpacing = 1.5.sp,
-                                color = GibborRed,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        GibborDangerButton(
-                            text = "STOP RECORDING",
-                            onClick = {
-                                val hash = controller.stopAudioRecording()
-                                if (hash != null && controller.lastBackendUrl.isNotEmpty() && controller.lastIncidentForEvidence.isNotEmpty()) {
-                                    controller.appendLog("AUDIO: Anchoring hash on blockchain...")
-                                    CoroutineScope(Dispatchers.Main).launch {
-                                        val ok = controller.sendEvidenceToBackend(controller.lastBackendUrl, controller.lastIncidentForEvidence, "audio", hash)
-                                        if (ok) controller.appendLog("AUDIO: Hash anchored on blockchain")
-                                        else    controller.appendLog("AUDIO: Error anchoring hash on blockchain")
-                                    }
+                            backendUrl = backendUrl,
+                            onBackendUrlChange = { backendUrl = it },
+                            busy = busy,
+                            recordingElapsedSeconds = recordingElapsedSeconds,
+                            authStatus = authStatus,
+                            onChainStatus = onChainStatus,
+                            incidentPreview = incidentPreview,
+                            onCreateIncident = {
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    busy = true
+                                    try { createAndSendIncident("MANUAL", useFrontCamera = false) }
+                                    catch (e: Exception) { controller.appendLog("MANUAL -> error: ${e.message}") }
+                                    finally { busy = false }
                                 }
-                            }
+                            },
+                            onStopRecording = onStopRecording,
+                        )
+
+                        GibborTab.DEMO -> DemoScreen(
+                            controller = controller,
+                            busy = busy,
+                            onChainStatus = onChainStatus,
+                            incidentPreview = incidentPreview,
+                            recordingElapsedSeconds = recordingElapsedSeconds,
+                            demoExecutionId = demoExecutionId,
+                            demoStartIncidentPreview = demoStartIncidentPreview,
+                            demoStartChainStatus = demoStartChainStatus,
+                            demoStartLogLength = demoStartLogLength,
+                            dismissedDemoExecutionId = dismissedDemoExecutionId,
+                            onResetDemo = { dismissedDemoExecutionId = demoExecutionId },
+                            onTrigger = {
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    if (!busy) beginDemoExecution()
+                                    handleHardwareTrigger("DEMO", useFrontCamera = true)
+                                }
+                            },
+                            onStopRecording = onStopRecording,
                         )
                     }
                 }
             }
-
-            // ── Estado on-chain ───────────────────────────────────────
-
-            if (onChainStatus.isNotBlank()) {
-                Spacer(Modifier.height(16.dp))
-                GibborCard {
-                    GibborSectionLabel("Transaction status")
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        onChainStatus
-                            .replace("✅", "").replace("❌", "").replace("⏳", "").trim(),
-                        fontSize = 12.sp,
-                        color = GibborDark,
-                        lineHeight = 18.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-
-            // ── Ultimo incidente ──────────────────────────────────────
-
-            if (controller.isAuthenticated && incidentPreview != "Ninguno") {
-                Spacer(Modifier.height(16.dp))
-                GibborCard {
-                    GibborSectionLabel("Last incident")
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        incidentPreview,
-                        fontSize = 11.sp,
-                        color = GibborDark,
-                        lineHeight = 17.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(28.dp))
-
-            // ── Menu: Configuracion ───────────────────────────────────
-
-            GibborCollapsible(
-                title = "Configuration",
-                expanded = configExpanded,
-                onToggle = { configExpanded = !configExpanded }
-            ) {
-                OutlinedTextField(
-                    value = backendUrl,
-                    onValueChange = { backendUrl = it },
-                    label = { Text("Backend URL") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-
-            // ── Menu: Bluetooth ───────────────────────────────────────
-
-            GibborCollapsible(
-                title = "Bluetooth",
-                expanded = btExpanded,
-                onToggle = { btExpanded = !btExpanded }
-            ) {
-                Text(
-                    controller.statusText,
-                    fontSize = 12.sp,
-                    color = GibborMid
-                )
-                Spacer(Modifier.height(12.dp))
-                GibborOutlinedButton(
-                    text = "Enable Bluetooth",
-                    onClick = { controller.ensureBluetoothEnabled() }
-                )
-                Spacer(Modifier.height(8.dp))
-                GibborOutlinedButton(
-                    text = if (controller.isConnecting) "Connecting..." else "Gibby Button",
-                    onClick = { controller.connectToEsp32() },
-                    enabled = !controller.isConnecting
-                )
-                Spacer(Modifier.height(8.dp))
-                GibborOutlinedButton(
-                    text = "Disconnect",
-                    onClick = { controller.disconnectFromEsp32() }
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-
-            // ── Menu: Registro ────────────────────────────────────────
-
-            GibborCollapsible(
-                title = "Activity log",
-                expanded = logExpanded,
-                onToggle = { logExpanded = !logExpanded }
-            ) {
-                Text(
-                    controller.logText,
-                    fontSize = 11.sp,
-                    color = GibborCharcoal,
-                    lineHeight = 17.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-
-            Spacer(Modifier.height(40.dp))
         }
+
+        SplashOverlay(modifier = Modifier.align(Alignment.Center))
     }
 }

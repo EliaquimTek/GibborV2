@@ -2,22 +2,17 @@ package mx.edu.utez.gibbor.presentation.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Brand — Navy
-val GibborNavy      = Color(0xFF0F1F3D)
-val GibborBlue      = Color(0xFF1A56DB)
-val GibborBlueLight = Color(0xFFEBF2FF)
-
-// Brand — Red
-val GibborRed       = Color(0xFFB91C1C)
-val GibborRedLight  = Color(0xFFFEF2F2)
-val GibborRedBorder = Color(0xFFFECACA)
-
-// Neutrals
-val GibborCharcoal  = Color(0xFF111827)
-val GibborDark      = Color(0xFF374151)
-val GibborMid       = Color(0xFF6B7280)
-val GibborLight     = Color(0xFF9CA3AF)
-val GibborBorder    = Color(0xFFE5E7EB)
-val GibborSurface   = Color(0xFFFFFFFF)
-val GibborBg        = Color(0xFFF4F6F9)
-val GibborGreen     = Color(0xFF16A34A)
+val Ink = Color(0xFF070A24)
+val Night = Color(0xFF0B1046)
+val Surface = Color(0xFF121845)
+val SurfaceHigh = Color(0xFF1A2160)
+val Stroke = Color(0xFF2A3275)
+val TextHi = Color(0xFFF2F4FF)
+val TextMid = Color(0xFFA9B0D6)
+val TextLow = Color(0xFF6E76A8)
+val Cyan = Color(0xFF2EC4E6)
+val Panic = Color(0xFFFF2D6F)
+val PanicDeep = Color(0xFFC8124F)
+val Violet = Color(0xFF8B3FD9)
+val Lime = Color(0xFF7ED957)
+val Amber = Color(0xFFFF9F1C)
