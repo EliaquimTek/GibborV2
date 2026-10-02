@@ -21,9 +21,10 @@ interface IncidentRepository {
         delayMs: Long = 3000L
     ): BackendResult
 
-    /** POST /api/incident/:incidentId/evidence — ancla el hash de un archivo. */
+    /** POST /api/incident/:incidentId/evidence — ancla el hash de un archivo con la wallet de [email]. */
     suspend fun sendEvidence(
         backendUrl: String,
+        email: String,
         incidentId: String,
         mediaType: String,
         mediaHash: String

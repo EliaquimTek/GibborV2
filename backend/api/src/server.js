@@ -7,7 +7,7 @@
  * Endpoints:
  *   POST /api/incident   — crea wallet (si no existe) + transacción on-chain
  *   GET  /api/incident/:txId — polling del estado de una transacción
- *   POST /api/evidence    — (FASE 2) recibe hash de evidencia y lo ancla on-chain
+ *   POST /api/incident/:incidentId/evidence — ancla el hash de audio/video on-chain
  */
 
 const { PORT } = require("./config/env");
@@ -17,6 +17,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀 GIBBOR Backend corriendo en http://0.0.0.0:${PORT}`);
   console.log(`   POST /api/incident     — crear incidente on-chain`);
   console.log(`   GET  /api/incident/:id — polling estado de TX`);
-  console.log(`   POST /api/evidence     — (FASE 2) anclar hash evidencia`);
+  console.log(`   POST /api/incident/:id/evidence — anclar hash evidencia`);
   console.log(`   GET  /health           — health check\n`);
 });

@@ -34,12 +34,14 @@ class HttpIncidentRepository : IncidentRepository {
      */
     override suspend fun sendEvidence(
         backendUrl: String,
+        email: String,
         incidentId: String,
         mediaType: String,
         mediaHash: String
     ): EvidenceResult = withContext(Dispatchers.IO) {
         try {
             val body = JSONObject()
+                .put("email", email)
                 .put("mediaType", mediaType)
                 .put("mediaHash", mediaHash)
 

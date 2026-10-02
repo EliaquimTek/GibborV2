@@ -1,6 +1,5 @@
-const { STELLAR_CONTRACT_ID } = require("../config/env");
-const { buildCreateIncidentTx, mapTransaction } = require("../domain/incident");
-const walletRepository = require("../infrastructure/crossmint/walletRepository");
+const { createIncidentCall } = require("../domain/incident");
+const { getOrCreateUserWallet, callContract } = require("../infrastructure/crossmint/stellarWalletGateway");
 
 /**
  * Caso de uso: crea wallet (si no existe) + transacción create_incident on-chain.
@@ -17,25 +16,23 @@ async function createIncident(incident) {
 
   // 1) Asegurar que exista la wallet Stellar del usuario
   console.log("1️⃣  Creando/verificando wallet Stellar...");
-  const wallet = await walletRepository.ensureStellarWallet(email);
+  const wallet = await getOrCreateUserWallet(email);
+  console.log(`   Wallet address: ${wallet.address}`);
 
-  const walletAddress = wallet?.address || wallet?.publicKey || "unknown";
-  console.log(`   Wallet address: ${walletAddress}`);
-
-  // 2) Crear la transacción contract-call
+  // 2) Enviar create_incident on-chain (el SDK espera la confirmación)
   console.log("2️⃣  Enviando create_incident on-chain...");
-  const txResult = await walletRepository.createTransaction(
-    email,
-    buildCreateIncidentTx(STELLAR_CONTRACT_ID, incident)
-  );
+  const tx = await callContract(wallet, createIncidentCall(incident));
 
-  // 3) Extraer datos relevantes de la respuesta
-  const txId = txResult.id || "";
-  const { status, txHash, explorerLink } = mapTransaction(txResult, txId);
+  console.log(`✅ TX confirmada: id=${tx.transactionId}`);
 
-  console.log(`✅ TX creada: status=${status}, id=${txId}`);
-
-  return { success: true, status, txId, txHash, explorerLink, walletAddress, raw: txResult };
+  return {
+    success: true,
+    status: "success",
+    txId: tx.transactionId,
+    txHash: tx.hash,
+    explorerLink: tx.explorerLink,
+    walletAddress: wallet.address,
+  };
 }
 
 module.exports = { createIncident };

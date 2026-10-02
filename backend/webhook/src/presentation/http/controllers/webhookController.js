@@ -1,28 +1,29 @@
 const logger = require('../../../shared/logger');
-const { hasRequiredPanicAlertFields } = require('../../../domain/panicAlert');
+const { hasRequiredPanicAlertFields, subjectOf } = require('../../../domain/panicAlert');
 const { processPanicAlert } = require('../../../application/processPanicAlert');
 
 /**
- * Process incoming PanicAlert events from Goldsky
+ * Process incoming contract events ("created" / "media") from Goldsky
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
 async function handlePanicAlert(req, res) {
   try {
-    const { evidence_hash, location, user_id, timestamp, transaction_hash } = req.body;
+    const { evidence_hash, location, user_id, incident_id, event_type, media_type, timestamp, transaction_hash } = req.body;
+    const alert = { evidence_hash, location, user_id, incident_id, event_type, media_type, timestamp, transaction_hash };
 
-    logger.info(`Received PanicAlert for user ${user_id} with evidence hash ${evidence_hash}`);
+    logger.info(`Received ${event_type || 'PanicAlert'} event for ${subjectOf(alert)} with evidence hash ${evidence_hash}`);
 
     // Validate required fields
-    if (!hasRequiredPanicAlertFields({ evidence_hash, location, user_id })) {
+    if (!hasRequiredPanicAlertFields(alert)) {
       return res.status(400).json({
-        error: 'Missing required fields: evidence_hash, location, user_id'
+        error: 'Missing required fields: evidence_hash, incident_id (or user_id), location (except media events)'
       });
     }
 
-    await processPanicAlert({ evidence_hash, location, user_id, timestamp, transaction_hash });
+    await processPanicAlert(alert);
 
-    logger.info(`Emergency response initiated for user ${user_id}`);
+    logger.info(`Emergency response initiated for ${subjectOf(alert)}`);
 
     res.status(200).json({
       status: 'success',

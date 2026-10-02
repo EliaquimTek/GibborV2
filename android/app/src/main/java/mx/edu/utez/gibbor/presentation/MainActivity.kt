@@ -400,7 +400,7 @@ class MainActivity : ComponentActivity(), MainScreenController {
         mediaType: String,
         mediaHash: String
     ): Boolean = withContext(Dispatchers.IO) {
-        val result = incidentRepository.sendEvidence(backendUrl, incidentId, mediaType, mediaHash)
+        val result = incidentRepository.sendEvidence(backendUrl, authenticatedEmail, incidentId, mediaType, mediaHash)
         when {
             result.exceptionMessage != null ->
                 appendLog("EVIDENCE [$mediaType] EXCEPTION: ${result.exceptionMessage}")

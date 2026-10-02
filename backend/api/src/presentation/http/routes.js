@@ -7,6 +7,7 @@ const router = express.Router();
 
 router.post("/api/incident", postIncident);
 router.get("/api/incident/:txId", getIncident);
+router.post("/api/incident/:incidentId/evidence", postEvidence);
 router.post("/api/evidence", postEvidence);
 router.get("/health", health);
 

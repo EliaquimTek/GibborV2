@@ -1,51 +1,77 @@
 version: 2
 name: gibbor-security-indexer
-description: Indexer for GIBBOR security system events on Soroban
+description: Indexer for GIBBOR incident-registry contract events on Soroban
 namespace: gibbor
 
+# El contrato emite dos eventos (ver contract/contracts/incident-registry/src/events.rs):
+#   created: topics = ("created", incident_id)  data = (timestamp, lat_e7, lon_e7, initial_hash)
+#   media:   topics = ("media",   incident_id)  data = (media_type, media_hash, uploaded_at)
+
 sources:
-  - name: soroban-mainnet
+  - name: soroban-testnet
     type: soroban
-    network: mainnet
-    # Alternatively use testnet for development
-    # network: testnet
+    # Crossmint staging firma en testnet. Cambiar a mainnet al pasar a producción.
+    network: testnet
 
 models:
-  - name: PanicAlertEvent
-    description: Event triggered when a user activates panic alert
+  - name: GibborEvent
+    description: Incident created or evidence hash attached on the GIBBOR contract
     schema:
-      evidence_hash: string
-      location: string
-      user_id: string
-      timestamp: uint64
+      event_type: string        # "created" | "media"
+      incident_id: string
+      evidence_hash: string     # initial_hash (created) o media_hash (media)
+      location: string          # "lat,lon" en grados (solo created)
+      media_type: string        # "audio" | "video" (solo media)
+      timestamp: uint64         # segundos Unix
       transaction_hash: string
       ledger_sequence: uint32
 
 indexings:
-  - name: panic-alert-indexer
-    description: Indexes PanicAlert events from GIBBOR smart contract
-    source: soroban-mainnet
-    # Replace with actual GIBBOR contract address on Soroban
-    contract_address: "CDOLLAR...GIBBOR"  # Example format, replace with real contract ID
+  - name: incident-created-indexer
+    description: Indexes create_incident events
+    source: soroban-testnet
+    contract_address: "CB36FLNBESA7WJIQTJMVKUAE63IAGZ75Q65XER4MD4MF5VCAAO4RGMLE"
     event_filter:
-      - event_name: PanicAlert
-        # Optional: filter by specific topics if needed
-        # topics: ["PanicAlert"]
+      - topics: ["created"]
     mapping:
       type: sql
       sql: |
-        INSERT INTO PanicAlertEvent (
-          evidence_hash,
-          location,
-          user_id,
-          timestamp,
-          transaction_hash,
-          ledger_sequence
+        INSERT INTO GibborEvent (
+          event_type, incident_id, evidence_hash, location, media_type,
+          timestamp, transaction_hash, ledger_sequence
         ) VALUES (
-          CAST(event.data->>'evidence_hash' AS STRING),
-          CAST(event.data->>'location' AS STRING),
-          CAST(event.data->>'user_id' AS STRING),
-          CAST(event.data->>'timestamp' AS UINT64),
+          'created',
+          CAST(event.topics->>1 AS STRING),
+          CAST(event.data->>3 AS STRING),
+          CONCAT(
+            CAST(CAST(event.data->>1 AS DOUBLE) / 10000000 AS STRING), ',',
+            CAST(CAST(event.data->>2 AS DOUBLE) / 10000000 AS STRING)
+          ),
+          NULL,
+          CAST(event.data->>0 AS UINT64),
+          event.transaction_hash,
+          event.ledger_sequence
+        );
+
+  - name: media-attached-indexer
+    description: Indexes attach_media_hash events
+    source: soroban-testnet
+    contract_address: "CB36FLNBESA7WJIQTJMVKUAE63IAGZ75Q65XER4MD4MF5VCAAO4RGMLE"
+    event_filter:
+      - topics: ["media"]
+    mapping:
+      type: sql
+      sql: |
+        INSERT INTO GibborEvent (
+          event_type, incident_id, evidence_hash, location, media_type,
+          timestamp, transaction_hash, ledger_sequence
+        ) VALUES (
+          'media',
+          CAST(event.topics->>1 AS STRING),
+          CAST(event.data->>1 AS STRING),
+          NULL,
+          CAST(event.data->>0 AS STRING),
+          CAST(event.data->>2 AS UINT64),
           event.transaction_hash,
           event.ledger_sequence
         );
@@ -70,6 +96,6 @@ sinks:
   - name: postgres-sink
     type: postgres
     connection_string: ${POSTGRES_CONNECTION_STRING}
-    table_name: panic_alert_events
+    table_name: gibbor_events
     batch_size: 100
     flush_interval: 10s
