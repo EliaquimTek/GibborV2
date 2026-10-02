@@ -20,7 +20,7 @@ GIBBOR-Refactor/
 │       │   └── usecase/         BuildIncidentDraftUseCase
 │       ├── data/
 │       │   ├── remote/          HttpIncidentRepository (backend GIBBOR)
-│       │   ├── bluetooth/       Esp32BluetoothClient (SPP con el botón ESP32)
+│       │   ├── bluetooth/       Esp32BleClient (BLE / Nordic UART con el botón ESP32-C3)
 │       │   ├── location/        LocationDataSource (Fused Location)
 │       │   └── recording/       AudioEvidenceRecorder, RecordingService (CameraX)
 │       └── presentation/

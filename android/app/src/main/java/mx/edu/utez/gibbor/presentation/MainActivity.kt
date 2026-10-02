@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import mx.edu.utez.gibbor.BuildConfig
 import mx.edu.utez.gibbor.core.util.HashUtils
-import mx.edu.utez.gibbor.data.bluetooth.Esp32BluetoothClient
+import mx.edu.utez.gibbor.data.bluetooth.Esp32BleClient
 import mx.edu.utez.gibbor.data.location.LocationDataSource
 import mx.edu.utez.gibbor.data.recording.AudioEvidenceRecorder
 import mx.edu.utez.gibbor.data.recording.RecordingService
@@ -56,9 +56,10 @@ class MainActivity : ComponentActivity(), MainScreenController {
     private lateinit var locationDataSource: LocationDataSource
     private lateinit var audioRecorder: AudioEvidenceRecorder
 
-    private val bluetoothClient = Esp32BluetoothClient(
+    private val bluetoothClient = Esp32BleClient(
+        context = this,
         postToMain = { block -> runOnUiThread(block) },
-        callbacks = object : Esp32BluetoothClient.Callbacks {
+        callbacks = object : Esp32BleClient.Callbacks {
             override fun onLog(message: String) = appendLog(message)
             override fun onStatus(status: String) { statusText = status }
             override fun onTrigger() { triggerCounter++ }
@@ -258,7 +259,7 @@ class MainActivity : ComponentActivity(), MainScreenController {
         }
     }
 
-    // ─── Bluetooth connection ─────────────────────────────────────────────
+    // ─── Bluetooth LE connection (ESP32-C3) ────────────────────────────────
 
     override fun connectToEsp32() {
         // Guard: evitar conexiones simultáneas
@@ -284,15 +285,8 @@ class MainActivity : ComponentActivity(), MainScreenController {
             return
         }
 
-        val device = bluetoothClient.findPairedDevice(adapter)
-
-        if (device == null) {
-            appendLog("'${Esp32BluetoothClient.DEVICE_NAME}' not found among paired devices.")
-            appendLog("Pair the ESP32 first from Settings > Bluetooth.")
-            return
-        }
-
-        bluetoothClient.connect(adapter, device)
+        // Escanea por BLE el ESP32-C3 (no requiere emparejarlo en Ajustes)
+        bluetoothClient.connect(adapter)
     }
 
     /**
@@ -371,7 +365,6 @@ class MainActivity : ComponentActivity(), MainScreenController {
         appendLog("AUDIO: File empty or not found.")
         return null
     }
-
     // ─── Incidente (ubicación + backend) ──────────────────────────────────
 
     override suspend fun getCurrentPhoneLocation(): Location = locationDataSource.getCurrentLocation()
