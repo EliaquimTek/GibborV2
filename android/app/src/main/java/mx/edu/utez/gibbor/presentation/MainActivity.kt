@@ -18,6 +18,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import mx.edu.utez.gibbor.domain.model.IncidentDraft
 import mx.edu.utez.gibbor.domain.repository.IncidentRepository
 import mx.edu.utez.gibbor.domain.usecase.BuildIncidentDraftUseCase
 import mx.edu.utez.gibbor.presentation.ui.screen.AppScreen
+import mx.edu.utez.gibbor.presentation.viewmodel.EmergencySmsViewModel
 import mx.edu.utez.gibbor.presentation.ui.theme.GibborTheme
 import java.io.File
 import java.text.SimpleDateFormat
@@ -60,6 +62,7 @@ class MainActivity : ComponentActivity(), MainScreenController {
     private val buildIncidentDraftUseCase = BuildIncidentDraftUseCase()
     private lateinit var locationDataSource: LocationDataSource
     private lateinit var audioRecorder: AudioEvidenceRecorder
+    private val emergencySmsViewModel: EmergencySmsViewModel by viewModels()
 
     private val bluetoothClient = Esp32BleClient(
         context = this,
@@ -153,6 +156,7 @@ class MainActivity : ComponentActivity(), MainScreenController {
 
     private val bluetoothPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            emergencySmsViewModel.refreshSmsPermission()
             val denied = result.filterValues { granted -> !granted }.keys
             if (denied.isEmpty()) {
                 appendLog("Bluetooth permissions granted.")
@@ -172,6 +176,16 @@ class MainActivity : ComponentActivity(), MainScreenController {
                 appendLog("Location permission granted.")
             } else {
                 appendLog("Location permission denied.")
+            }
+        }
+
+    private val smsPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            emergencySmsViewModel.refreshSmsPermission()
+            if (granted) {
+                appendLog("SMS permission granted.")
+            } else {
+                appendLog("SMS permission denied.")
             }
         }
 
@@ -219,7 +233,7 @@ class MainActivity : ComponentActivity(), MainScreenController {
             CrossmintSDKProvider
                 .Builder(BuildConfig.CROSSMINT_API_KEY)
                 .build {
-                    GibborTheme { AppScreen(controller = this@MainActivity) }
+                    GibborTheme { AppScreen(controller = this@MainActivity, smsViewModel = emergencySmsViewModel) }
                 }
         }
     }
@@ -319,7 +333,8 @@ class MainActivity : ComponentActivity(), MainScreenController {
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CAMERA
+            Manifest.permission.CAMERA,
+            Manifest.permission.SEND_SMS
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -380,6 +395,10 @@ class MainActivity : ComponentActivity(), MainScreenController {
 
     override fun requestLocationPermission() {
         locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    override fun requestSmsPermission() {
+        smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
     }
 
     // ─── Audio / video recording ──────────────────────────────────────────

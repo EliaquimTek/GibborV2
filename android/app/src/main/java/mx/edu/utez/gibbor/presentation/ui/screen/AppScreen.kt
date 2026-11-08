@@ -39,6 +39,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import mx.edu.utez.gibbor.BuildConfig
 import mx.edu.utez.gibbor.data.recording.CameraPreviewHolder
+import mx.edu.utez.gibbor.domain.model.EmergencySmsResult
 import mx.edu.utez.gibbor.presentation.MainScreenController
 import mx.edu.utez.gibbor.presentation.ui.components.ChainState
 import mx.edu.utez.gibbor.presentation.ui.components.GibborNavigationBar
@@ -50,10 +51,11 @@ import mx.edu.utez.gibbor.presentation.ui.screen.home.HomeScreen
 import mx.edu.utez.gibbor.presentation.ui.screen.onboarding.OnboardingScreen
 import mx.edu.utez.gibbor.presentation.ui.screen.settings.SettingsSheet
 import mx.edu.utez.gibbor.presentation.ui.theme.Motion
+import mx.edu.utez.gibbor.presentation.viewmodel.EmergencySmsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppScreen(controller: MainScreenController) {
+fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewModel) {
     // Valor por defecto desde local.properties (BACKEND_URL)
     // Emulador: 10.0.2.2:3001 | Dispositivo físico: IP de la laptop en WiFi
     // Producción: https://api.tudominio.com
@@ -102,6 +104,17 @@ fun AppScreen(controller: MainScreenController) {
         controller.appendLog("$source -> incident_id=${draft.incidentId}")
         controller.appendLog("$source -> lat_e7=${draft.latE7}, lon_e7=${draft.lonE7}")
         controller.appendLog("$source -> hash=${draft.initialHash}")
+
+        // --- Paso 1b: SMS a contactos de emergencia (no espera a la blockchain) ---
+        val sms = smsViewModel.sendAlert(controller.authenticatedEmail, location.latitude, location.longitude)
+        when (sms) {
+            EmergencySmsResult.NoContacts -> controller.appendLog("$source -> SMS: no emergency contacts configured")
+            EmergencySmsResult.MissingPermission -> controller.appendLog("$source -> SMS: missing SEND_SMS permission")
+            is EmergencySmsResult.Sent -> {
+                sms.errors.forEach { controller.appendLog("$source -> SMS ERROR $it") }
+                controller.appendLog("$source -> SMS: sent to ${sms.sent}/${sms.total} contacts")
+            }
+        }
 
         // --- Paso 2: Enviar al backend ---
         authStatus = "Sending to backend..."
@@ -436,6 +449,10 @@ fun AppScreen(controller: MainScreenController) {
                 controller = controller,
                 backendUrl = backendUrl,
                 onBackendUrlChange = { backendUrl = it },
+                emergencyContacts = smsViewModel.contacts,
+                validContactCount = smsViewModel.validContactCount,
+                onEmergencyContactsChange = smsViewModel::updateContacts,
+                smsPermissionGranted = smsViewModel.smsPermissionGranted,
                 authStatus = authStatus,
                 onDismiss = { showSettings = false },
             )

@@ -36,6 +36,7 @@ interface MainScreenController {
     fun hasLocationPermission(): Boolean
     fun requestBluetoothPermissions()
     fun requestLocationPermission()
+    fun requestSmsPermission()
 
     // ─── Incidente ────────────────────────────────────────────────────────
     suspend fun getCurrentPhoneLocation(): Location

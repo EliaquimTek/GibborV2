@@ -51,6 +51,7 @@ class FakeMainScreenController(
         error("preview")
     override suspend fun sendEvidenceToBackend(backendUrl: String, incidentId: String, mediaType: String, mediaHash: String) =
         false
+    override fun requestSmsPermission() = Unit
     override fun startAudioRecording(incidentId: String, useFrontCamera: Boolean) = Unit
     override fun stopAudioRecording(): String? = null
     override fun ensureBluetoothEnabled() = Unit
@@ -181,6 +182,10 @@ private fun SettingsLight() = PreviewSurface(dark = false) {
         controller = FakeMainScreenController(),
         backendUrl = "http://10.0.2.2:3001",
         onBackendUrlChange = {},
+        emergencyContacts = "777 123 4567, +52 55 1234 5678",
+        validContactCount = 2,
+        onEmergencyContactsChange = {},
+        smsPermissionGranted = true,
         authStatus = "Session started",
     )
 }
@@ -192,6 +197,10 @@ private fun SettingsDark() = PreviewSurface(dark = true) {
         controller = FakeMainScreenController(logText = ""),
         backendUrl = "http://10.0.2.2:3001",
         onBackendUrlChange = {},
+        emergencyContacts = "",
+        validContactCount = 0,
+        onEmergencyContactsChange = {},
+        smsPermissionGranted = false,
         authStatus = "Incident registered on-chain",
     )
 }

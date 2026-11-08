@@ -4,7 +4,13 @@
         android:name="android.hardware.bluetooth"
         android:required="true" />
 
+    <!-- SMS a contactos de emergencia; sin telefonía la app sigue funcionando -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />

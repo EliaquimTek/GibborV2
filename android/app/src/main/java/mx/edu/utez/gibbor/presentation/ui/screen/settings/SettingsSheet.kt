@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import mx.edu.utez.gibbor.BuildConfig
+import mx.edu.utez.gibbor.domain.model.EmergencyContacts
 import mx.edu.utez.gibbor.presentation.MainScreenController
 import mx.edu.utez.gibbor.presentation.ui.components.GibborLogo
 import mx.edu.utez.gibbor.presentation.ui.components.LogConsole
@@ -57,6 +59,10 @@ fun SettingsSheet(
     controller: MainScreenController,
     backendUrl: String,
     onBackendUrlChange: (String) -> Unit,
+    emergencyContacts: String,
+    validContactCount: Int,
+    onEmergencyContactsChange: (String) -> Unit,
+    smsPermissionGranted: Boolean,
     authStatus: String,
     onDismiss: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -71,6 +77,10 @@ fun SettingsSheet(
             controller = controller,
             backendUrl = backendUrl,
             onBackendUrlChange = onBackendUrlChange,
+            emergencyContacts = emergencyContacts,
+            validContactCount = validContactCount,
+            onEmergencyContactsChange = onEmergencyContactsChange,
+            smsPermissionGranted = smsPermissionGranted,
             authStatus = authStatus,
         )
     }
@@ -82,6 +92,10 @@ fun SettingsContent(
     controller: MainScreenController,
     backendUrl: String,
     onBackendUrlChange: (String) -> Unit,
+    emergencyContacts: String,
+    validContactCount: Int,
+    onEmergencyContactsChange: (String) -> Unit,
+    smsPermissionGranted: Boolean,
     authStatus: String,
     modifier: Modifier = Modifier,
 ) {
@@ -126,6 +140,29 @@ fun SettingsContent(
                 icon = Icons.Rounded.BluetoothDisabled,
                 title = "Desconectar",
                 onClick = { controller.disconnectFromEsp32() },
+            )
+        }
+
+        Section("Contactos de emergencia") {
+            OutlinedTextField(
+                value = emergencyContacts,
+                onValueChange = onEmergencyContactsChange,
+                label = { Text("Teléfonos (separados por coma)") },
+                supportingText = {
+                    Text("$validContactCount de ${EmergencyContacts.MAX_CONTACTS} válidos · 10 dígitos o con +lada")
+                },
+                shape = MaterialTheme.shapes.small,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            )
+            InsetDivider()
+            SettingsItem(
+                icon = Icons.Rounded.Sms,
+                title = if (smsPermissionGranted) "Permiso de SMS concedido" else "Permitir enviar SMS",
+                supporting = "Al activar la alerta se envía tu ubicación por SMS",
+                onClick = if (smsPermissionGranted) null else ({ controller.requestSmsPermission() }),
             )
         }
 
