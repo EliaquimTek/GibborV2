@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 import mx.edu.utez.gibbor.BuildConfig
 import mx.edu.utez.gibbor.data.recording.CameraPreviewHolder
 import mx.edu.utez.gibbor.domain.model.EmergencySmsResult
+import mx.edu.utez.gibbor.events.ui.EventScreen
 import mx.edu.utez.gibbor.presentation.MainScreenController
 import mx.edu.utez.gibbor.presentation.ui.components.ChainState
 import mx.edu.utez.gibbor.presentation.ui.components.GibborNavigationBar
@@ -426,6 +427,8 @@ fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewMo
                                 },
                                 modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                             )
+
+                            GibborTab.EVENTO -> EventScreen()
                         }
                     }
                 }

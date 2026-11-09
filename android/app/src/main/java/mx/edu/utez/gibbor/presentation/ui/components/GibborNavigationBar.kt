@@ -1,6 +1,7 @@
 package mx.edu.utez.gibbor.presentation.ui.components
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Icon
@@ -17,6 +18,7 @@ import androidx.compose.ui.unit.dp
 enum class GibborTab(val label: String, val icon: ImageVector) {
     GIBBOR("GIBBOR", Icons.Rounded.Shield),
     DEMO("DEMO", Icons.Rounded.PlayCircle),
+    EVENTO("Evento", Icons.Rounded.Event),
 }
 
 @Composable
