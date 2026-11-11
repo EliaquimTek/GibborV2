@@ -22,16 +22,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mx.edu.utez.gibbor.events.data.EventCatalog
 import mx.edu.utez.gibbor.events.domain.Event
 import mx.edu.utez.gibbor.events.domain.EventResource
+import mx.edu.utez.gibbor.events.ui.qr.QrDialog
 
 /**
  * Pestaña "Evento" (solo existe en la rama `events`).
@@ -44,11 +48,8 @@ fun EventScreen(
     event: Event? = EventCatalog.events.firstOrNull(),
     fixedResources: List<EventResource> = EventCatalog.fixedResources,
 ) {
-    val uriHandler = LocalUriHandler.current
-    val openResource: (EventResource) -> Unit = { resource ->
-        // Sin app que abra el enlace (p. ej. sin cliente de correo) no hacemos nada.
-        runCatching { uriHandler.openUri(resource.url) }
-    }
+    var qrResource by remember { mutableStateOf<EventResource?>(null) }
+    val openResource: (EventResource) -> Unit = { qrResource = it }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Scaffold(
@@ -94,6 +95,10 @@ fun EventScreen(
                 resourceSection("GIBBOR", fixedResources, openResource)
             }
         }
+    }
+
+    qrResource?.let { resource ->
+        QrDialog(resource = resource, onDismiss = { qrResource = null })
     }
 }
 

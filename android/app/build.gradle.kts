@@ -79,4 +79,7 @@ dependencies {
     implementation("androidx.camera:camera-video:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
     implementation("androidx.lifecycle:lifecycle-process:2.9.4")
+
+    // Rama events: generación de QR sin red (pestaña Evento)
+    implementation("com.google.zxing:core:3.5.3")
 }

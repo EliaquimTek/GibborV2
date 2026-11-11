@@ -44,7 +44,7 @@ fun ResourceType.icon(): ImageVector = when (this) {
     ResourceType.OTRO -> Icons.Rounded.Link
 }
 
-/** Fila de un recurso: ícono del tipo, título y descripción. */
+/** Fila de un recurso: ícono del tipo, título, descripción y acceso a su QR. */
 @Composable
 fun ResourceRow(
     resource: EventResource,
@@ -55,7 +55,7 @@ fun ResourceRow(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(role = Role.Button, onClickLabel = "Mostrar QR", onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
