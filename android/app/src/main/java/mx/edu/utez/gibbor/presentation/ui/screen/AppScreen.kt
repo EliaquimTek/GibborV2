@@ -33,13 +33,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import mx.edu.utez.gibbor.BuildConfig
 import mx.edu.utez.gibbor.data.recording.CameraPreviewHolder
-import mx.edu.utez.gibbor.domain.model.EmergencySmsResult
 import mx.edu.utez.gibbor.presentation.MainScreenController
 import mx.edu.utez.gibbor.presentation.ui.components.ChainState
 import mx.edu.utez.gibbor.presentation.ui.components.GibborNavigationBar
@@ -56,172 +52,60 @@ import mx.edu.utez.gibbor.presentation.viewmodel.EmergencySmsViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewModel) {
-    // Valor por defecto desde local.properties (BACKEND_URL)
-    // Emulador: 10.0.2.2:3001 | Dispositivo físico: IP de la laptop en WiFi
-    // Producción: https://api.tudominio.com
-    var backendUrl by remember { mutableStateOf(BuildConfig.BACKEND_URL) }
     var email by remember { mutableStateOf("") }
-    var authStatus by remember { mutableStateOf("No autenticado") }
-    var busy by remember { mutableStateOf(false) }
-    var lastHandledTrigger by remember { mutableIntStateOf(0) }
+    var authStatus by remember {
+        mutableStateOf(if (controller.isAuthenticated) "Session started" else "No autenticado")
+    }
     var lastHandledDemoTrigger by remember { mutableIntStateOf(controller.demoTriggerCounter) }
     var demoExecutionId by remember { mutableIntStateOf(0) }
     var demoStartIncidentPreview by remember { mutableStateOf("Ninguno") }
     var demoStartChainStatus by remember { mutableStateOf("") }
     var demoStartLogLength by remember { mutableIntStateOf(0) }
     var dismissedDemoExecutionId by remember { mutableIntStateOf(0) }
-    var incidentPreview by remember { mutableStateOf("Ninguno") }
-    var onChainStatus by remember { mutableStateOf("") }
+
+    // El flujo de pánico (ubicación → grabación → SMS → blockchain) corre en
+    // ProtectionService para que funcione con la app cerrada; aquí solo se refleja.
+    val busy = controller.busy
+    val onChainStatus = controller.onChainStatus
+    val incidentPreview = controller.incidentPreview
 
     /**
-     * Flujo completo: ubicación → draft → backend → on-chain
-     * authStatus se usa SOLO para display. isAuthenticated controla el flujo.
+     * Disparos hechos desde la app (SOS, DEMO, control remoto). Pide los permisos que
+     * falten y delega al servicio. El botón físico lo atiende el servicio directamente.
      */
-    suspend fun createAndSendIncident(source: String, useFrontCamera: Boolean) {
+    fun handleHardwareTrigger(source: String, useFrontCamera: Boolean) {
+        if (!controller.isAuthenticated) {
+            controller.appendLog("$source -> authenticate first")
+            return
+        }
+        if (controller.busy || controller.isRecording) {
+            controller.appendLog("$source -> busy, trigger ignored")
+            return
+        }
         if (!controller.hasAudioPermission() || !controller.hasCameraPermission()) {
             controller.appendLog("$source -> Missing recording permissions. Grant them and try again.")
             controller.requestBluetoothPermissions()
             return
         }
-
         if (!controller.hasLocationPermission()) {
             controller.appendLog("$source -> missing location permission")
             controller.requestLocationPermission()
             return
         }
-
-        // --- Paso 1: Generar incidente local ---
-        val location = controller.getCurrentPhoneLocation()
-        val draft = controller.buildIncidentDraft(location)
-
-        incidentPreview =
-            "id=${draft.incidentId}\n" +
-                    "timestamp=${draft.timestamp}\n" +
-                    "lat_e7=${draft.latE7}\n" +
-                    "lon_e7=${draft.lonE7}\n" +
-                    "hash=${draft.initialHash}"
-
-        controller.appendLog("$source -> incident_id=${draft.incidentId}")
-        controller.appendLog("$source -> lat_e7=${draft.latE7}, lon_e7=${draft.lonE7}")
-        controller.appendLog("$source -> hash=${draft.initialHash}")
-
-        // --- Paso 1b: SMS a contactos de emergencia (no espera a la blockchain) ---
-        val sms = smsViewModel.sendAlert(controller.authenticatedEmail, location.latitude, location.longitude)
-        when (sms) {
-            EmergencySmsResult.NoContacts -> controller.appendLog("$source -> SMS: no emergency contacts configured")
-            EmergencySmsResult.MissingPermission -> controller.appendLog("$source -> SMS: missing SEND_SMS permission")
-            is EmergencySmsResult.Sent -> {
-                sms.errors.forEach { controller.appendLog("$source -> SMS ERROR $it") }
-                controller.appendLog("$source -> SMS: sent to ${sms.sent}/${sms.total} contacts")
-            }
-        }
-
-        // --- Paso 2: Enviar al backend ---
-        authStatus = "Sending to backend..."
-        onChainStatus = "Sending..."
-        controller.appendLog("$source -> Sending incident to $backendUrl...")
-
-        try {
-            val result = controller.sendIncidentToBackend(backendUrl, controller.authenticatedEmail, draft)
-
-            controller.appendLog("$source -> Backend response: success=${result.success}")
-            controller.appendLog("$source -> status=${result.status}")
-            controller.appendLog("$source -> txId=${result.txId}")
-            controller.appendLog("$source -> txHash=${result.txHash}")
-            controller.appendLog("$source -> explorer=${result.explorerLink}")
-
-            if (!result.success) {
-                onChainStatus = "Error: ${result.error}"
-                authStatus = "Backend error"
-                controller.appendLog("$source -> BACKEND ERROR: ${result.error}")
-                controller.appendLog("$source -> Raw: ${result.rawJson}")
-                return
-            }
-
-            // --- Paso 3: Polling si está pendiente ---
-            var finalResult = result
-            if (result.status in listOf("pending", "awaiting-approval")) {
-                controller.appendLog("$source -> TX pending, polling backend...")
-                onChainStatus = "TX pending, waiting for confirmation..."
-                finalResult = controller.pollBackendStatus(backendUrl, controller.authenticatedEmail, result.txId)
-                controller.appendLog("$source -> Polling final: status=${finalResult.status}")
-            }
-
-            // --- Paso 4: Resultado final ---
-            val emoji = when (finalResult.status) {
-                "success" -> "✅"
-                "failed" -> "❌"
-                else -> "⏳"
-            }
-            onChainStatus =
-                "$emoji Status: ${finalResult.status}\n" +
-                "TX: ${finalResult.txHash}\n" +
-                "Explorer: ${finalResult.explorerLink}"
-
-            authStatus = when (finalResult.status) {
-                "success" -> "Incident registered on-chain"
-                "failed" -> "TX failed on-chain"
-                else -> "TX: ${finalResult.status}"
-            }
-            // ⚠️ isAuthenticated NO se toca — sigue siendo true
-
-            // --- Paso 5: Iniciar grabación de audio automáticamente ---
-            if (finalResult.status == "success") {
-                controller.appendLog("$source -> TX confirmed. Starting evidence collection...")
-                controller.lastBackendUrl = backendUrl
-                controller.lastIncidentForEvidence = draft.incidentId
-                controller.startAudioRecording(draft.incidentId, useFrontCamera)
-            }
-        } catch (e: Exception) {
-            val errorMsg = e.message ?: "Unknown error"
-            onChainStatus = "❌ Error: $errorMsg"
-            authStatus = "❌ Error: $errorMsg"
-            controller.appendLog("$source -> EXCEPTION: $errorMsg")
-            // ⚠️ isAuthenticated NO se toca — sigue siendo true
-        }
-    }
-
-    suspend fun handleHardwareTrigger(source: String, useFrontCamera: Boolean) {
-        if (source != "ESP32" && busy) {
-            controller.appendLog("$source -> busy, trigger ignored")
-            return
-        }
-        if (!controller.isAuthenticated) {
-            controller.appendLog("$source -> authenticate first")
-            return
-        }
-
-        busy = true
-        try {
-            createAndSendIncident(source, useFrontCamera)
-        } catch (e: Exception) {
-            controller.appendLog("$source -> error: " + e.message)
-        } finally {
-            busy = false
-        }
+        controller.triggerPanic(source, useFrontCamera)
     }
 
     fun beginDemoExecution() {
-        demoStartIncidentPreview = incidentPreview
-        demoStartChainStatus = onChainStatus
+        demoStartIncidentPreview = controller.incidentPreview
+        demoStartChainStatus = controller.onChainStatus
         demoStartLogLength = controller.logText.length
         demoExecutionId++
-    }
-
-    // ─── Trigger ESP32 ────────────────────────────────────────────────────
-
-    LaunchedEffect(controller.triggerCounter) {
-        if (controller.triggerCounter <= 0 || controller.triggerCounter == lastHandledTrigger) return@LaunchedEffect
-
-        lastHandledTrigger = controller.triggerCounter
-
-        handleHardwareTrigger("ESP32", useFrontCamera = false)
     }
 
     LaunchedEffect(controller.demoTriggerCounter) {
         if (controller.demoTriggerCounter == lastHandledDemoTrigger) return@LaunchedEffect
         lastHandledDemoTrigger = controller.demoTriggerCounter
-        if (!busy) beginDemoExecution()
+        if (!controller.busy) beginDemoExecution()
         handleHardwareTrigger("REMOTE", useFrontCamera = true)
     }
 
@@ -234,13 +118,13 @@ fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewMo
     val uiScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
-    LaunchedEffect(controller.isRecording) {
+    LaunchedEffect(controller.isRecording, controller.recordingStartedAt) {
         if (controller.isRecording) {
-            val recordingStartedAt = System.currentTimeMillis()
-            recordingElapsedSeconds = 0L
+            // El inicio lo fija el servicio: al abrir la app a mitad de una grabación el contador es correcto
+            val recordingStartedAt = controller.recordingStartedAt.takeIf { it > 0L } ?: System.currentTimeMillis()
             while (true) {
-                delay(1000)
                 recordingElapsedSeconds = (System.currentTimeMillis() - recordingStartedAt) / 1000
+                delay(1000)
             }
         } else {
             recordingElapsedSeconds = 0L
@@ -251,29 +135,12 @@ fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewMo
         controller.isDemoActive = selectedTab == GibborTab.DEMO
     }
 
-    val onStopRecording: () -> Unit = {
-        val hash = controller.stopAudioRecording()
-        if (hash != null && controller.lastBackendUrl.isNotEmpty() && controller.lastIncidentForEvidence.isNotEmpty()) {
-            controller.appendLog("AUDIO: Anchoring hash on blockchain...")
-            CoroutineScope(Dispatchers.Main).launch {
-                val ok = controller.sendEvidenceToBackend(controller.lastBackendUrl, controller.lastIncidentForEvidence, "audio", hash)
-                if (ok) controller.appendLog("AUDIO: Hash anchored on blockchain")
-                else    controller.appendLog("AUDIO: Error anchoring hash on blockchain")
-            }
-        }
-    }
+    val onStopRecording: () -> Unit = { controller.stopRecording() }
 
-    val onManualIncident: () -> Unit = {
-        CoroutineScope(Dispatchers.Main).launch {
-            busy = true
-            try { createAndSendIncident("MANUAL", useFrontCamera = false) }
-            catch (e: Exception) { controller.appendLog("MANUAL -> error: ${e.message}") }
-            finally { busy = false }
-        }
-    }
+    val onManualIncident: () -> Unit = { handleHardwareTrigger("MANUAL", useFrontCamera = false) }
 
     // ─── Vista previa selfie (BRIEF 2) ─────────────────────────────────────
-    // Un único PreviewView registrado en CameraPreviewHolder; RecordingService lo usa solo con la
+    // Un único PreviewView registrado en CameraPreviewHolder; ProtectionService lo usa solo con la
     // cámara frontal (DEMO/REMOTE). Se muestra dentro de "Emergencia activa".
     val context = LocalContext.current
     val selfiePreviewView = remember {
@@ -419,10 +286,8 @@ fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewMo
                                 dismissedDemoExecutionId = dismissedDemoExecutionId,
                                 onResetDemo = { dismissedDemoExecutionId = demoExecutionId },
                                 onTrigger = {
-                                    CoroutineScope(Dispatchers.Main).launch {
-                                        if (!busy) beginDemoExecution()
-                                        handleHardwareTrigger("DEMO", useFrontCamera = true)
-                                    }
+                                    if (!controller.busy) beginDemoExecution()
+                                    handleHardwareTrigger("DEMO", useFrontCamera = true)
                                 },
                                 modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                             )
@@ -447,8 +312,8 @@ fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewMo
         if (showSettings && controller.isAuthenticated && !controller.isRecording) {
             SettingsSheet(
                 controller = controller,
-                backendUrl = backendUrl,
-                onBackendUrlChange = { backendUrl = it },
+                backendUrl = controller.backendUrl,
+                onBackendUrlChange = controller::updateBackendUrl,
                 emergencyContacts = smsViewModel.contacts,
                 validContactCount = smsViewModel.validContactCount,
                 onEmergencyContactsChange = smsViewModel::updateContacts,

@@ -39,8 +39,9 @@ En Arduino IDE: placa **ESP32C3 Dev Module**, **USB CDC On Boot: Enabled**. Moni
 
 Comportamiento:
 - **Antirrebote** 50 ms y **cooldown** 1.5 s entre pánicos (evita dobles disparos).
-- **Pánico sin conexión**: se guarda y se entrega al suscribirse la app si ocurrió hace < 60 s,
-  como `GIBBOR_PANIC_TRIGGER #n (diferido)`.
+- **Pánico sin conexión**: se guarda y se entrega al suscribirse la app si ocurrió hace < 5 min,
+  como `GIBBOR_PANIC_TRIGGER #n (diferido)`. La app reconecta sola (espera máx. 30 s entre
+  intentos), así que el pánico llega aunque el teléfono se haya alejado un momento.
 - **MTU**: las notificaciones se trocean según el MTU del enlace (20 bytes con MTU 23). El pánico
   siempre empieza por `GIBBOR_PANIC_TRIGGER`, que cabe en el primer trozo.
 - Tras desconectarse vuelve a anunciarse automáticamente.
@@ -54,6 +55,7 @@ Comportamiento:
 | `STATUS` | `STATUS connected=… subscribed=… triggers=… pending=… mtu=…` |
 | `TRIGGER` | Simula una pulsación (misma función `firePanic()` que el botón) |
 | `SIMMTU <n>` | Solo Serial, para pruebas: simula un MTU pequeño. `SIMMTU 0` lo desactiva |
+| `DROP` | Solo Serial, para pruebas: corta la conexión BLE como si el teléfono se alejara |
 | `HELP` | Lista de comandos |
 
 Ninguna respuesta contiene `GIBBOR_PANIC_TRIGGER` ni `Boton`, así que la app no las confunde con un pánico.
@@ -74,7 +76,7 @@ cd firmware && .venv/Scripts/python tests/test_gibbor_esp32.py --port COM15
 
 Usa `--skip-ble` si la PC no tiene Bluetooth LE.
 
-### Resultado en la placa real (2026-11-10, ESP32-C3 rev 0.4, Windows 11): 28/28 ✅
+### Resultado en la placa real (2026-11-10, ESP32-C3 rev 0.4, Windows 11): 33/33 ✅
 
 | Grupo | Prueba | Resultado |
 |---|---|---|
@@ -92,7 +94,15 @@ Usa `--skip-ble` si la PC no tiene Bluetooth LE.
 | BLE | MTU 23: trozos ≤ 20 bytes y exactamente 1 pánico detectado | ✅ |
 | BLE | Re-anuncio tras desconexión | ✅ ~2 s |
 | BLE | Pánico sin conexión se entrega al reconectar | ✅ |
-| BLE | 3 ciclos conectar/PING/desconectar | ✅ |
+| BLE | 3 ciclos conectar/PING/desconectar | ✅ (en 1 de 4 corridas falló un ciclo por el stack BLE de Windows) |
+| Reconexión | El anuncio incluye el UUID NUS (lo encuentra el `ScanFilter` de Android) | ✅ |
+| Reconexión | STATUS completo en una sola notificación (MTU 256) | ✅ |
+| Reconexión | Caída de conexión (`DROP`) detectada | ✅ |
+| Reconexión | Reconexión automática con escaneo filtrado + espera creciente | ✅ ~4–5 s, 1 intento |
+| Reconexión | Pánico presionado sin conexión llega como `(diferido)` | ✅ |
 | Global | Sin crash durante toda la sesión | ✅ |
+
+Las pruebas de "Reconexión" reproducen desde la PC lo que hace la app con la protección en
+segundo plano (`ProtectionService` + `Esp32BleClient`).
 
 Pendiente: prueba manual presionando el botón físico con la app instalada en un teléfono.

@@ -1,22 +1,22 @@
 package mx.edu.utez.gibbor.presentation
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.location.Location
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.animation.PathInterpolator
 import androidx.activity.ComponentActivity
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
@@ -25,63 +25,47 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.crossmint.kotlin.compose.CrossmintSDKProvider
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import mx.edu.utez.gibbor.BuildConfig
-import mx.edu.utez.gibbor.core.util.HashUtils
-import mx.edu.utez.gibbor.data.bluetooth.Esp32BleClient
 import mx.edu.utez.gibbor.data.location.LocationDataSource
-import mx.edu.utez.gibbor.data.recording.AudioEvidenceRecorder
-import mx.edu.utez.gibbor.data.recording.RecordingService
-import mx.edu.utez.gibbor.data.remote.HttpIncidentRepository
-import mx.edu.utez.gibbor.domain.model.BackendResult
-import mx.edu.utez.gibbor.domain.model.IncidentDraft
-import mx.edu.utez.gibbor.domain.repository.IncidentRepository
-import mx.edu.utez.gibbor.domain.usecase.BuildIncidentDraftUseCase
+import mx.edu.utez.gibbor.data.session.ProtectionPrefs
 import mx.edu.utez.gibbor.presentation.ui.screen.AppScreen
-import mx.edu.utez.gibbor.presentation.viewmodel.EmergencySmsViewModel
 import mx.edu.utez.gibbor.presentation.ui.theme.GibborTheme
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import mx.edu.utez.gibbor.presentation.viewmodel.EmergencySmsViewModel
+import mx.edu.utez.gibbor.service.ProtectionHub
+import mx.edu.utez.gibbor.service.ProtectionService
+import mx.edu.utez.gibbor.service.ProtectionState
 
 class MainActivity : ComponentActivity(), MainScreenController {
 
-    companion object {
-        private const val STELLAR_CONTRACT_ID =
-            "CB36FLNBESA7WJIQTJMVKUAE63IAGZ75Q65XER4MD4MF5VCAAO4RGMLE"
-    }
+    // ─── Dependencias ─────────────────────────────────────────────────────
 
-    // ─── Dependencias (capas data / domain) ───────────────────────────────
-
-    private val incidentRepository: IncidentRepository = HttpIncidentRepository()
-    private val buildIncidentDraftUseCase = BuildIncidentDraftUseCase()
+    private lateinit var prefs: ProtectionPrefs
     private lateinit var locationDataSource: LocationDataSource
-    private lateinit var audioRecorder: AudioEvidenceRecorder
     private val emergencySmsViewModel: EmergencySmsViewModel by viewModels()
 
-    private val bluetoothClient = Esp32BleClient(
-        context = this,
-        postToMain = { block -> runOnUiThread(block) },
-        callbacks = object : Esp32BleClient.Callbacks {
-            override fun onLog(message: String) = appendLog(message)
-            override fun onStatus(status: String) { statusText = status }
-            override fun onTrigger() { triggerCounter++ }
-        }
-    )
+    // ─── Estado reflejado del servicio de protección ─────────────────────
 
-    // ─── Estado de UI ─────────────────────────────────────────────────────
+    private var protection by mutableStateOf(ProtectionHub.state.value)
+    override var logText by mutableStateOf(ProtectionHub.log.value)
+        private set
 
-    override var statusText by mutableStateOf("Status: Disconnected")
-        private set
-    override var logText by mutableStateOf("Esperando...\n")
-        private set
-    override var triggerCounter by mutableIntStateOf(0)
-        private set
+    override val statusText: String get() = protection.statusText
+    override val triggerCounter: Int get() = protection.esp32TriggerCount
+    override val isRecording: Boolean get() = protection.isRecording
+    override val recordingStartedAt: Long get() = protection.recordingStartedAt
+    override val isConnecting: Boolean get() = protection.isConnecting
+    override val busy: Boolean get() = protection.busy
+    override val onChainStatus: String get() = protection.onChainStatus
+    override val incidentPreview: String get() = protection.incidentPreview
+    override val isProtectionActive: Boolean get() = protection.protectionActive
+
+    // ─── Estado propio de la UI ───────────────────────────────────────────
+
     override var demoTriggerCounter by mutableIntStateOf(0)
         private set
     override var lastDemoKey by mutableStateOf("")
@@ -89,54 +73,15 @@ class MainActivity : ComponentActivity(), MainScreenController {
     override var isDemoActive by mutableStateOf(false)
     private var lastDemoTriggerAtMillis = 0L
 
-    // ─── Bluetooth state ──────────────────────────────────────────────────
-
-    private var bluetoothAdapter: BluetoothAdapter? = null
-    private var pendingConnect = false
-
-    override val isConnecting: Boolean
-        get() = bluetoothClient.isConnecting
-
-    // ─── Audio recording state ─────────────────────────────────────────────
-
-    override var isRecording by mutableStateOf(false)
-        private set
-
-    // ─── Auth state (separado de UI) ──────────────────────────────────────
-
-    // Respaldado por estado de Compose para que la UI cambie de Onboarding a Inicio al iniciar sesión.
     override var isAuthenticated by mutableStateOf(false)
         private set
     override var authenticatedEmail by mutableStateOf("")
         private set
+    override var backendUrl by mutableStateOf(BuildConfig.BACKEND_URL)
+        private set
 
-    // ─── Contexto de sesión accesible desde receivers ─────────────────────
-
-    @Volatile override var lastBackendUrl: String = ""
-    @Volatile override var lastIncidentForEvidence: String = ""
-
-    // ─── Video recording broadcast receiver ───────────────────────────────
-
-    private val recordingDoneReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            val id   = intent?.getStringExtra(RecordingService.EXTRA_INCIDENT_ID) ?: return
-            val path = intent.getStringExtra(RecordingService.EXTRA_FILE_PATH) ?: ""
-            val hash = intent.getStringExtra(RecordingService.EXTRA_SHA256) ?: ""
-            appendLog("VIDEO: Recording finished [$id]")
-            appendLog("VIDEO: File: ${File(path).name}")
-            appendLog("VIDEO: SHA-256: $hash")
-
-            if (hash.isNotEmpty() && lastBackendUrl.isNotEmpty()) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    val result = sendEvidenceToBackend(lastBackendUrl, id, "video", hash)
-                    withContext(Dispatchers.Main) {
-                        if (result) appendLog("VIDEO: Hash anchored on blockchain")
-                        else        appendLog("VIDEO: Error anchoring hash on blockchain")
-                    }
-                }
-            }
-        }
-    }
+    private var bluetoothAdapter: BluetoothAdapter? = null
+    private var pendingConnect = false
 
     // ─── Permission launchers ─────────────────────────────────────────────
 
@@ -159,34 +104,25 @@ class MainActivity : ComponentActivity(), MainScreenController {
             emergencySmsViewModel.refreshSmsPermission()
             val denied = result.filterValues { granted -> !granted }.keys
             if (denied.isEmpty()) {
-                appendLog("Bluetooth permissions granted.")
-                if (pendingConnect) {
-                    pendingConnect = false
-                    connectToEsp32()
-                }
+                appendLog("Permissions granted.")
             } else {
+                appendLog("Permissions denied: ${denied.joinToString()}")
+            }
+            if (pendingConnect) {
                 pendingConnect = false
-                appendLog("Bluetooth permissions denied: ${denied.joinToString()}")
+                if (hasBluetoothPermissions()) connectToEsp32()
             }
         }
 
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) {
-                appendLog("Location permission granted.")
-            } else {
-                appendLog("Location permission denied.")
-            }
+            appendLog(if (granted) "Location permission granted." else "Location permission denied.")
         }
 
     private val smsPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             emergencySmsViewModel.refreshSmsPermission()
-            if (granted) {
-                appendLog("SMS permission granted.")
-            } else {
-                appendLog("SMS permission denied.")
-            }
+            appendLog(if (granted) "SMS permission granted." else "SMS permission denied.")
         }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────
@@ -211,23 +147,26 @@ class MainActivity : ComponentActivity(), MainScreenController {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = bluetoothManager.adapter
-
+        prefs = ProtectionPrefs(this)
+        locationDataSource = LocationDataSource(this)
+        bluetoothAdapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (bluetoothAdapter == null) {
-            statusText = "Status: This device does not support Bluetooth"
             appendLog("Bluetooth not supported on this device.")
         }
 
-        locationDataSource = LocationDataSource(this)
-        audioRecorder = AudioEvidenceRecorder(this)
+        // Sesión persistida: el servicio la necesita aunque la app esté cerrada
+        backendUrl = prefs.backendUrl
+        prefs.email.takeIf { it.isNotBlank() }?.let { saved ->
+            isAuthenticated = true
+            authenticatedEmail = saved
+        }
 
-        ContextCompat.registerReceiver(
-            this,
-            recordingDoneReceiver,
-            IntentFilter(RecordingService.BROADCAST_DONE),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { ProtectionHub.state.collect { protection = it } }
+                launch { ProtectionHub.log.collect { logText = it } }
+            }
+        }
 
         setContent {
             CrossmintSDKProvider
@@ -238,22 +177,38 @@ class MainActivity : ComponentActivity(), MainScreenController {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        stopAudioRecording()
-        disconnectFromEsp32()
-        unregisterReceiver(recordingDoneReceiver)
+    override fun onStart() {
+        super.onStart()
+        // Si el sistema detuvo el servicio, al abrir la app se reanuda con acceso completo
+        // a cámara, micrófono y ubicación (solo se concede arrancando en primer plano).
+        resumeProtectionIfNeeded()
+    }
+
+    // La Activity ya no desconecta el botón ni detiene la grabación al cerrarse:
+    // eso lo gestiona ProtectionService.
+
+    private fun resumeProtectionIfNeeded() {
+        if (!isAuthenticated || !prefs.protectionEnabled) return
+        if (!hasBluetoothPermissions() || bluetoothAdapter?.isEnabled != true) return
+        val s: ProtectionState = ProtectionHub.state.value
+        if (!ProtectionService.isRunning || s.limitedMode) ProtectionService.start(this)
     }
 
     // ─── Logging / sesión ─────────────────────────────────────────────────
 
-    override fun appendLog(message: String) {
-        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        logText += "[$time] $message\n"
+    override fun appendLog(message: String) = ProtectionHub.log(message)
+
+    override fun clearLog() = ProtectionHub.clearLog()
+
+    override fun startSession(email: String) {
+        prefs.email = email
+        isAuthenticated = true
+        authenticatedEmail = email
     }
 
-    override fun clearLog() {
-        logText = ""
+    override fun updateBackendUrl(url: String) {
+        backendUrl = url
+        prefs.backendUrl = url
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -293,98 +248,35 @@ class MainActivity : ComponentActivity(), MainScreenController {
         return super.dispatchKeyEvent(event)
     }
 
-    override fun startSession(email: String) {
-        isAuthenticated = true
-        authenticatedEmail = email
-    }
+    // ─── Permisos ─────────────────────────────────────────────────────────
 
-    // ─── Bluetooth permissions ────────────────────────────────────────────
+    private fun isGranted(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    override fun ensureBluetoothEnabled() {
-        val adapter = bluetoothAdapter ?: run {
-            appendLog("No Bluetooth adapter.")
-            return
-        }
-
-        if (adapter.isEnabled) {
-            appendLog("Bluetooth already enabled.")
-            return
-        }
-
-        val enableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-        enableBluetoothLauncher.launch(enableIntent)
-    }
-
-    private fun hasBluetoothPermissions(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val hasConnect = isGranted(Manifest.permission.BLUETOOTH_CONNECT)
-            val hasScan = isGranted(Manifest.permission.BLUETOOTH_SCAN)
-            val hasLocation = isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
-
-            hasConnect && hasScan && hasLocation
+    private fun hasBluetoothPermissions(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            isGranted(Manifest.permission.BLUETOOTH_CONNECT) &&
+                isGranted(Manifest.permission.BLUETOOTH_SCAN) &&
+                isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
         } else {
-            true
+            isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-    }
 
     override fun requestBluetoothPermissions() {
         val perms = mutableListOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA,
-            Manifest.permission.SEND_SMS
+            Manifest.permission.SEND_SMS,
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            bluetoothPermissionLauncher.launch(perms.toTypedArray())
+            perms += Manifest.permission.BLUETOOTH_CONNECT
+            perms += Manifest.permission.BLUETOOTH_SCAN
         }
-    }
-
-    // ─── Bluetooth LE connection (ESP32-C3) ────────────────────────────────
-
-    override fun connectToEsp32() {
-        // Guard: evitar conexiones simultáneas
-        if (bluetoothClient.isConnecting) {
-            appendLog("Connection already in progress.")
-            return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms += Manifest.permission.POST_NOTIFICATIONS
         }
-
-        val adapter = bluetoothAdapter ?: run {
-            appendLog("No Bluetooth adapter available.")
-            return
-        }
-
-        if (!hasBluetoothPermissions()) {
-            pendingConnect = true
-            requestBluetoothPermissions()
-            return
-        }
-
-        if (!adapter.isEnabled) {
-            pendingConnect = true
-            ensureBluetoothEnabled()
-            return
-        }
-
-        // Escanea por BLE el ESP32-C3 (no requiere emparejarlo en Ajustes)
-        bluetoothClient.connect(adapter)
-    }
-
-    /**
-     * Desconexión limpia — cierra streams, socket, y espera a que el hilo muera.
-     */
-    override fun disconnectFromEsp32() {
-        bluetoothClient.disconnect(silent = false)
-    }
-
-    // ─── Permisos de grabación / ubicación ────────────────────────────────
-
-    private fun isGranted(permission: String): Boolean {
-        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        bluetoothPermissionLauncher.launch(perms.toTypedArray())
     }
 
     override fun hasAudioPermission(): Boolean = isGranted(Manifest.permission.RECORD_AUDIO)
@@ -401,105 +293,76 @@ class MainActivity : ComponentActivity(), MainScreenController {
         smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
     }
 
-    // ─── Audio / video recording ──────────────────────────────────────────
+    // ─── Bluetooth / protección ───────────────────────────────────────────
 
-    override fun startAudioRecording(incidentId: String, useFrontCamera: Boolean) {
-        if (!hasAudioPermission()) {
-            appendLog("AUDIO: Missing RECORD_AUDIO permission")
+    override fun ensureBluetoothEnabled() {
+        val adapter = bluetoothAdapter ?: run {
+            appendLog("No Bluetooth adapter.")
+            return
+        }
+        if (adapter.isEnabled) {
+            appendLog("Bluetooth already enabled.")
+            return
+        }
+        enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+    }
+
+    override fun connectToEsp32() {
+        if (protection.isConnecting) {
+            appendLog("Connection already in progress.")
+            return
+        }
+        val adapter = bluetoothAdapter ?: run {
+            appendLog("No Bluetooth adapter available.")
+            return
+        }
+        if (!hasBluetoothPermissions()) {
+            pendingConnect = true
+            requestBluetoothPermissions()
+            return
+        }
+        if (!adapter.isEnabled) {
+            pendingConnect = true
+            ensureBluetoothEnabled()
             return
         }
 
-        // Detener grabación previa si existe
-        stopAudioRecording()
+        // Se arranca aquí, con la app en primer plano, para que el servicio conserve
+        // cámara/micrófono/ubicación cuando la app se cierre.
+        ProtectionService.start(this)
+        requestBatteryExemptionOnce()
+    }
 
+    override fun disconnectFromEsp32() {
+        ProtectionService.stopProtection(this)
+    }
+
+    /**
+     * Pide (una sola vez) que Android no optimice la batería de GIBBOR. Sin esto,
+     * algunos fabricantes cierran el servicio en segundo plano aunque sea de primer plano.
+     */
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryExemptionOnce() {
+        if (prefs.batteryPromptShown) return
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        prefs.batteryPromptShown = true
         try {
-            val audioFile = audioRecorder.start(incidentId)
-            isRecording = true
-            appendLog("AUDIO: Recording -> ${audioFile.name}")
-
-            // Iniciar grabación de video en paralelo (ForegroundService con CameraX)
-            if (hasCameraPermission()) {
-                val svcIntent = Intent(this, RecordingService::class.java).apply {
-                    action = RecordingService.ACTION_START
-                    putExtra(RecordingService.EXTRA_INCIDENT_ID, incidentId)
-                    putExtra(RecordingService.EXTRA_USE_FRONT_CAMERA, useFrontCamera)
-                }
-                ContextCompat.startForegroundService(this, svcIntent)
-                if (useFrontCamera) appendLog("VIDEO: Starting video recording (front camera)...")
-                else appendLog("VIDEO: Starting video recording...")
-            } else {
-                appendLog("VIDEO: No CAMERA permission — audio only")
-            }
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+            )
         } catch (e: Exception) {
-            appendLog("AUDIO ERROR: ${e.message}")
-            isRecording = false
+            appendLog("Battery optimization settings not available: ${e.message}")
         }
     }
 
-    override fun stopAudioRecording(): String? {
-        if (!audioRecorder.isActive) return null
+    // ─── Emergencia ───────────────────────────────────────────────────────
 
-        val file = audioRecorder.stop(onError = ::appendLog)
-        isRecording = false
-
-        // Detener grabación de video
-        stopService(Intent(this, RecordingService::class.java))
-
-        if (file != null && file.exists() && file.length() > 0) {
-            val hash = HashUtils.sha256File(file)
-            appendLog("AUDIO: Recording stopped. File: ${file.name}")
-            appendLog("AUDIO: Size: ${file.length()} bytes")
-            appendLog("AUDIO: SHA-256: $hash")
-            return hash
-        }
-
-        appendLog("AUDIO: File empty or not found.")
-        return null
+    override fun triggerPanic(source: String, useFrontCamera: Boolean) {
+        ProtectionService.trigger(this, source, useFrontCamera)
     }
-    // ─── Incidente (ubicación + backend) ──────────────────────────────────
 
-    override suspend fun getCurrentPhoneLocation(): Location = locationDataSource.getCurrentLocation()
-
-    override fun buildIncidentDraft(location: Location): IncidentDraft =
-        buildIncidentDraftUseCase(location.latitude, location.longitude)
-
-    /**
-     * Envía el incidente al BACKEND (no a Crossmint directamente).
-     */
-    override suspend fun sendIncidentToBackend(
-        backendUrl: String,
-        email: String,
-        draft: IncidentDraft
-    ): BackendResult = incidentRepository.sendIncident(backendUrl, email, draft)
-
-    /**
-     * Polling del estado de TX al backend.
-     */
-    override suspend fun pollBackendStatus(
-        backendUrl: String,
-        email: String,
-        txId: String
-    ): BackendResult = incidentRepository.pollStatus(backendUrl, email, txId)
-
-    /**
-     * Ancla el hash del archivo de evidencia en el contrato Soroban.
-     * Retorna true si se ancló correctamente.
-     */
-    override suspend fun sendEvidenceToBackend(
-        backendUrl: String,
-        incidentId: String,
-        mediaType: String,
-        mediaHash: String
-    ): Boolean = withContext(Dispatchers.IO) {
-        val result = incidentRepository.sendEvidence(backendUrl, authenticatedEmail, incidentId, mediaType, mediaHash)
-        when {
-            result.exceptionMessage != null ->
-                appendLog("EVIDENCE [$mediaType] EXCEPTION: ${result.exceptionMessage}")
-            result.success ->
-                appendLog("EVIDENCE [$mediaType]: TX=${result.txHash}")
-            else ->
-                appendLog("EVIDENCE [$mediaType] ERROR: ${result.error}")
-        }
-        result.success
+    override fun stopRecording() {
+        ProtectionService.stopRecording(this)
     }
 }

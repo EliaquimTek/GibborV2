@@ -1,14 +1,11 @@
 package mx.edu.utez.gibbor.presentation.ui.preview
 
-import android.location.Location
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import mx.edu.utez.gibbor.domain.model.BackendResult
-import mx.edu.utez.gibbor.domain.model.IncidentDraft
 import mx.edu.utez.gibbor.presentation.MainScreenController
 import mx.edu.utez.gibbor.presentation.ui.screen.demo.DemoScreen
 import mx.edu.utez.gibbor.presentation.ui.screen.home.EmergencyActiveScreen
@@ -32,28 +29,25 @@ class FakeMainScreenController(
     override val triggerCounter: Int = 0
     override val demoTriggerCounter: Int = 0
     override var isDemoActive: Boolean = false
-    override var lastBackendUrl: String = ""
-    override var lastIncidentForEvidence: String = ""
+    override val recordingStartedAt: Long = 0L
+    override val busy: Boolean = false
+    override val onChainStatus: String = SAMPLE_CHAIN_STATUS
+    override val incidentPreview: String = SAMPLE_INCIDENT
+    override val backendUrl: String = "http://10.0.2.2:3001"
+    override val isProtectionActive: Boolean = true
 
     override fun appendLog(message: String) = Unit
     override fun clearLog() = Unit
     override fun startSession(email: String) = Unit
+    override fun updateBackendUrl(url: String) = Unit
     override fun hasAudioPermission() = permissionsGranted
     override fun hasCameraPermission() = permissionsGranted
     override fun hasLocationPermission() = permissionsGranted
     override fun requestBluetoothPermissions() = Unit
     override fun requestLocationPermission() = Unit
-    override suspend fun getCurrentPhoneLocation(): Location = error("preview")
-    override fun buildIncidentDraft(location: Location): IncidentDraft = error("preview")
-    override suspend fun sendIncidentToBackend(backendUrl: String, email: String, draft: IncidentDraft): BackendResult =
-        error("preview")
-    override suspend fun pollBackendStatus(backendUrl: String, email: String, txId: String): BackendResult =
-        error("preview")
-    override suspend fun sendEvidenceToBackend(backendUrl: String, incidentId: String, mediaType: String, mediaHash: String) =
-        false
     override fun requestSmsPermission() = Unit
-    override fun startAudioRecording(incidentId: String, useFrontCamera: Boolean) = Unit
-    override fun stopAudioRecording(): String? = null
+    override fun triggerPanic(source: String, useFrontCamera: Boolean) = Unit
+    override fun stopRecording() = Unit
     override fun ensureBluetoothEnabled() = Unit
     override fun connectToEsp32() = Unit
     override fun disconnectFromEsp32() = Unit
