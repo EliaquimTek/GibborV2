@@ -77,6 +77,9 @@ static String gSerialLine;
 
 static uint32_t gLedFlashUntil = 0;
 
+static volatile uint16_t gMtu = 23; // MTU ATT negociado con la app
+static size_t gSimChunk = 0;        // SIMMTU (solo pruebas): limita el trozo
+
 // ─── Utilidades ───────────────────────────────────────────────────────────
 static void ledWrite(bool on) {
   digitalWrite(LED_PIN, (on ^ LED_ACTIVE_LOW) ? HIGH : LOW);
@@ -86,15 +89,35 @@ static String macString() {
   return BLEDevice::getAddress().toString().c_str();
 }
 
+// Bytes útiles por notificación. La app no pide un MTU mayor, así que en
+// Android < 14 queda el MTU por defecto (23 -> 20 bytes). Las notificaciones
+// más largas se trocean; el trigger siempre empieza con
+// "GIBBOR_PANIC_TRIGGER" (20 bytes), así que el primer trozo basta para que
+// la app lo detecte.
+static size_t chunkSize() {
+  // Se consulta a la pila en cada envío: el callback onMtuChanged puede llegar
+  // antes que onConnect y dejar un valor viejo.
+  uint16_t mtu = gServer ? gServer->getPeerMTU(gServer->getConnId()) : 0;
+  if (mtu >= 23) gMtu = mtu;
+  size_t n = (gMtu > 3 ? gMtu : 23) - 3;
+  if (gSimChunk > 0 && gSimChunk < n) n = gSimChunk;
+  return n;
+}
+
 static bool sendLine(const String &line) {
   if (!gConnected || !gSubscribed || gTx == nullptr) {
     Serial.printf("[BLE] Sin suscriptor, no se envio: %s\n", line.c_str());
     return false;
   }
   String payload = line + "\n";
-  gTx->setValue((uint8_t *)payload.c_str(), payload.length());
-  gTx->notify();
-  Serial.printf("[BLE] TX -> %s\n", line.c_str());
+  const size_t step = chunkSize();
+  for (size_t off = 0; off < payload.length(); off += step) {
+    size_t len = min(step, payload.length() - off);
+    gTx->setValue((uint8_t *)payload.c_str() + off, len);
+    gTx->notify();
+    if (off + len < payload.length()) delay(3);
+  }
+  Serial.printf("[BLE] TX -> %s (mtu=%u, trozo=%u)\n", line.c_str(), gMtu, (unsigned)step);
   return true;
 }
 
@@ -149,12 +172,18 @@ static void handleCommand(String cmd, bool viaBle) {
     reply(String("STATUS connected=") + (gConnected ? 1 : 0) +
               " subscribed=" + (gSubscribed ? 1 : 0) +
               " triggers=" + gTriggerCount +
-              " pending=" + (gPendingTrigger ? 1 : 0),
+              " pending=" + (gPendingTrigger ? 1 : 0) +
+              " mtu=" + gMtu,
           viaBle);
   } else if (cmd == "TRIGGER") {
     firePanic(viaBle ? "BLE" : "SERIAL");
+  } else if (!viaBle && cmd.startsWith("SIMMTU")) {
+    // Solo por Serial: simula un MTU pequeño (p. ej. SIMMTU 23); SIMMTU 0 lo desactiva
+    int mtu = cmd.substring(6).toInt();
+    gSimChunk = mtu > 3 ? (size_t)(mtu - 3) : 0;
+    reply(String("SIMMTU chunk=") + gSimChunk, false);
   } else if (cmd == "HELP") {
-    reply("CMDS: PING INFO STATUS TRIGGER HELP", viaBle);
+    reply("CMDS: PING INFO STATUS TRIGGER SIMMTU HELP", viaBle);
   } else {
     reply(String("ERR unknown_cmd=") + cmd, viaBle);
   }
@@ -164,11 +193,17 @@ static void handleCommand(String cmd, bool viaBle) {
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *server) override {
     gConnected = true;
+    gMtu = 23;
     Serial.println("[BLE] Celular conectado");
+  }
+  void onMtuChanged(BLEServer *server, ble_gap_conn_desc *desc, uint16_t mtu) override {
+    gMtu = mtu;
+    Serial.printf("[BLE] MTU negociado: %u\n", mtu);
   }
   void onDisconnect(BLEServer *server) override {
     gConnected = false;
     gSubscribed = false;
+    gMtu = 23;
     gNeedAdvertise = true;
     Serial.println("[BLE] Celular desconectado");
   }

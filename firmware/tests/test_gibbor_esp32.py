@@ -233,6 +233,29 @@ async def ble_tests(dev: Dev):
         n = sum(1 for x in rx_lines if app_is_trigger(x))
         record("Segundo pánico tras cooldown (vía RX)", n == 2, f"{n} triggers")
 
+        # MTU 23 (Android < 14 sin requestMtu): cada notificación lleva <= 20 bytes
+        await client.write_gatt_char(NUS_RX, b"STATUS", response=True)
+        l, _ = await wait_line(lambda x: x.startswith("STATUS") and "mtu=" in x)
+        print("    MTU negociado con esta PC:", l.split("mtu=")[-1] if l else "?")
+        sizes = []
+
+        def on_raw(_, data: bytearray):
+            sizes.append(len(data))
+            on_notify(_, data)
+
+        await client.stop_notify(NUS_TX)
+        await client.start_notify(NUS_TX, on_raw)
+        dev.ser.write(b"SIMMTU 23\n")
+        await asyncio.sleep(1.6)
+        rx_lines.clear(); rx_times.clear()
+        dev.ser.write(b"TRIGGER\n")
+        await asyncio.sleep(0.8)
+        trig = [x for x in rx_lines if app_is_trigger(x)]
+        record("MTU 23: notificaciones <= 20 bytes", bool(sizes) and max(sizes) <= 20, f"tamaños={sizes}")
+        record("MTU 23: la app detecta exactamente 1 pánico", len(trig) == 1, f"líneas={rx_lines}")
+        dev.ser.write(b"SIMMTU 0\n")
+        await asyncio.sleep(0.3)
+
     # Desconexión -> debe volver a anunciarse
     await asyncio.sleep(1.5)
     d2, dt2 = await find_device()
