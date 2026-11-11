@@ -294,6 +294,94 @@ async def ble_tests(dev: Dev):
     record("3 ciclos conectar/PING/desconectar", ok_cycles == 3, f"{ok_cycles}/3")
 
 
+async def filtered_scan(timeout=12.0):
+    """Escaneo filtrado por UUID de servicio, como el ScanFilter de la app (Esp32BleClient)."""
+    found = asyncio.get_running_loop().create_future()
+
+    def on_adv(d, adv):
+        if NUS_SERVICE in [u.lower() for u in adv.service_uuids] and not found.done():
+            found.set_result(d)
+
+    scanner = BleakScanner(detection_callback=on_adv, service_uuids=[NUS_SERVICE])
+    await scanner.start()
+    try:
+        return await asyncio.wait_for(found, timeout)
+    except asyncio.TimeoutError:
+        return None
+    finally:
+        await scanner.stop()
+
+
+async def reconnect_chain_tests(dev: Dev):
+    """
+    Cadena completa de la app nueva:
+    conectado -> se cae la conexión -> pánico sin conexión -> reconexión automática
+    (escaneo filtrado + espera creciente 2/5/10/20/30 s) -> notificaciones -> pánico diferido.
+    """
+    print("\n== Reconexión automática (cadena de la app con protección en segundo plano) ==")
+    rx_lines = []
+
+    def on_notify(_, data: bytearray):
+        rx_lines.extend(app_parse(bytes(data)))
+
+    async def wait_line(pred, timeout=4.0):
+        end = time.time() + timeout
+        while time.time() < end:
+            hit = next((l for l in rx_lines if pred(l)), None)
+            if hit:
+                return hit
+            await asyncio.sleep(0.02)
+        return None
+
+    await asyncio.sleep(1.5)
+    d = await filtered_scan()
+    record("Anuncio incluye el UUID NUS (el ScanFilter de Android lo encuentra)", d is not None)
+    if not d:
+        return
+
+    dropped = asyncio.Event()
+    async with BleakClient(d, timeout=15.0, disconnected_callback=lambda _: dropped.set()) as client:
+        await client.start_notify(NUS_TX, on_notify)
+        await client.write_gatt_char(NUS_RX, b"STATUS", response=True)
+        st = await wait_line(lambda x: x.startswith("STATUS"))
+        record("STATUS completo en una sola notificación (MTU negociado)", st is not None and "mtu=" in st, st)
+
+        # Te alejas: el enlace se corta
+        dev.ser.write(b"DROP\n")
+        try:
+            await asyncio.wait_for(dropped.wait(), 6.0)
+            record("Caída de conexión detectada", True)
+        except asyncio.TimeoutError:
+            record("Caída de conexión detectada", False)
+            return
+
+    # Presionas el botón mientras estás desconectado
+    await asyncio.sleep(1.6)
+    dev.ser.write(b"TRIGGER\n")
+    t_drop = time.time()
+
+    # Reconexión como Esp32BleClient: espera creciente + escaneo filtrado
+    rx_lines.clear()
+    delays = [2, 5, 10, 20, 30]
+    line, attempts = None, 0
+    for delay in delays:
+        attempts += 1
+        await asyncio.sleep(delay)
+        dx = await filtered_scan()
+        if not dx:
+            continue
+        try:
+            async with BleakClient(dx, timeout=15.0) as client:
+                await client.start_notify(NUS_TX, on_notify)  # reactiva notificaciones (CCCD)
+                line = await wait_line(app_is_trigger)
+                break
+        except Exception as e:  # noqa: BLE001
+            print("    intento falló:", e)
+    elapsed = time.time() - t_drop
+    record("Reconexión automática tras la caída", line is not None, f"{elapsed:.1f} s, {attempts} intento(s)")
+    record("Pánico presionado sin conexión llega como diferido", line is not None and "diferido" in line, line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default="COM15")
@@ -306,6 +394,7 @@ def main():
         serial_tests(dev)
         if not args.skip_ble:
             asyncio.run(ble_tests(dev))
+            asyncio.run(reconnect_chain_tests(dev))
         # El firmware no debe haberse reiniciado durante todo el proceso
         log = dev.buf
         record("Sin crash durante toda la sesión", "Guru Meditation" not in log and "abort()" not in log)

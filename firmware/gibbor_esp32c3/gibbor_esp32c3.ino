@@ -48,7 +48,7 @@
 
 static const uint32_t DEBOUNCE_MS = 50;           // filtro de rebote
 static const uint32_t TRIGGER_COOLDOWN_MS = 1500; // evita disparos dobles
-static const uint32_t PENDING_TRIGGER_TTL_MS = 60000; // pánico sin conexión: se entrega al reconectar si es reciente
+static const uint32_t PENDING_TRIGGER_TTL_MS = 5UL * 60UL * 1000UL; // pánico sin conexión: se entrega al reconectar (5 min)
 
 #define NUS_SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define NUS_RX_UUID      "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -169,6 +169,7 @@ static void handleCommand(String cmd, bool viaBle) {
               " btn=GPIO" + BUTTON_PIN + " uptime_s=" + (millis() / 1000),
           viaBle);
   } else if (cmd == "STATUS") {
+    if (gConnected) chunkSize(); // refresca gMtu con el MTU real del enlace
     reply(String("STATUS connected=") + (gConnected ? 1 : 0) +
               " subscribed=" + (gSubscribed ? 1 : 0) +
               " triggers=" + gTriggerCount +
@@ -182,8 +183,16 @@ static void handleCommand(String cmd, bool viaBle) {
     int mtu = cmd.substring(6).toInt();
     gSimChunk = mtu > 3 ? (size_t)(mtu - 3) : 0;
     reply(String("SIMMTU chunk=") + gSimChunk, false);
+  } else if (!viaBle && cmd == "DROP") {
+    // Solo por Serial: corta la conexión como si el teléfono se alejara (pruebas de reconexión)
+    if (gConnected && gServer) {
+      gServer->disconnect(gServer->getConnId());
+      reply("DROP ok", false);
+    } else {
+      reply("DROP no_connection", false);
+    }
   } else if (cmd == "HELP") {
-    reply("CMDS: PING INFO STATUS TRIGGER SIMMTU HELP", viaBle);
+    reply("CMDS: PING INFO STATUS TRIGGER SIMMTU DROP HELP", viaBle);
   } else {
     reply(String("ERR unknown_cmd=") + cmd, viaBle);
   }
