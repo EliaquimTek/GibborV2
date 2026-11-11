@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -29,10 +31,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mx.edu.utez.gibbor.events.data.EventCatalog
+import mx.edu.utez.gibbor.events.data.SelectedEventStore
 import mx.edu.utez.gibbor.events.domain.Event
 import mx.edu.utez.gibbor.events.domain.EventResource
 import mx.edu.utez.gibbor.events.ui.qr.QrDialog
@@ -45,9 +49,16 @@ import mx.edu.utez.gibbor.events.ui.qr.QrDialog
 @Composable
 fun EventScreen(
     modifier: Modifier = Modifier,
-    event: Event? = EventCatalog.events.firstOrNull(),
+    events: List<Event> = EventCatalog.events,
     fixedResources: List<EventResource> = EventCatalog.fixedResources,
 ) {
+    val context = LocalContext.current
+    val store = remember { SelectedEventStore(context.applicationContext) }
+    var selectedId by remember { mutableStateOf(store.load()) }
+    // Si el evento guardado ya no existe en el catálogo, se usa el primero.
+    val event = events.firstOrNull { it.id == selectedId } ?: events.firstOrNull()
+    var showPicker by remember { mutableStateOf(false) }
+
     var qrResource by remember { mutableStateOf<EventResource?>(null) }
     val openResource: (EventResource) -> Unit = { qrResource = it }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -67,10 +78,18 @@ fun EventScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                 },
+                actions = {
+                    if (events.isNotEmpty()) {
+                        IconButton(onClick = { showPicker = true }) {
+                            Icon(Icons.Rounded.CalendarMonth, contentDescription = "Cambiar evento")
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     scrolledContainerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground,
                 ),
                 scrollBehavior = scrollBehavior,
             )
@@ -99,6 +118,19 @@ fun EventScreen(
 
     qrResource?.let { resource ->
         QrDialog(resource = resource, onDismiss = { qrResource = null })
+    }
+
+    if (showPicker) {
+        EventPickerSheet(
+            events = events,
+            selectedId = event?.id,
+            onSelect = {
+                selectedId = it.id
+                store.save(it.id)
+                showPicker = false
+            },
+            onDismiss = { showPicker = false },
+        )
     }
 }
 
@@ -149,13 +181,14 @@ private fun EventHeader(event: Event?) {
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Solo ocurre si el catálogo no tiene eventos (si los hay, siempre hay uno elegido).
             Text(
-                "Sin evento seleccionado",
+                "Sin eventos precargados",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                "Mientras tanto se muestran los recursos generales del equipo.",
+                "Se agregan en EventCatalog.kt. Mientras tanto se muestran los recursos generales del equipo.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -165,7 +198,7 @@ private fun EventHeader(event: Event?) {
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            val meta = listOf(event.date, event.place).filter { it.isNotBlank() }.joinToString(" · ")
+            val meta = event.meta()
             if (meta.isNotEmpty()) {
                 Text(
                     meta,
