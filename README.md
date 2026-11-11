@@ -27,6 +27,7 @@ GIBBOR-Refactor/
 │           ├── MainActivity     Permisos, ciclo de vida y orquestación
 │           ├── MainScreenController  Estado/acciones que consume la UI
 │           └── ui/              screen/AppScreen, components/, theme/
+├── firmware/                    Botón físico ESP32-C3 (Arduino) + pruebas de hardware — ver firmware/README.md
 ├── backend/
 │   ├── api/                     API para la app (Crossmint → Soroban), puerto 3001
 │   │   └── src/ config · domain · application · infrastructure/crossmint · presentation/http
