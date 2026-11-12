@@ -13,7 +13,19 @@ Placa: **ESP32-C3 SuperMini** (V1601) dentro de la carcasa impresa, con un pulsa
 | Botón rojo (externo) | **GPIO4** | `INPUT_PULLUP`, activo en bajo. **Una pata a GPIO4 y la otra a GND. Nunca a 3.3 V.** |
 | Botón BOOT de la placa | GPIO9 | También dispara el pánico (útil para pruebas) |
 | Botón alternativo | GPIO10 | Pad libre (no es pin de arranque) para resoldar el botón rojo entre GPIO10 y GND sin reflashear |
-| Botón de la placa B | GPIO3 | Protoboard: botón a 3.3 V con pull-down externa (activo en alto). Ver [gibborv2.md](gibborv2.md) |
+| Botón de la placa B | GPIO3 | Protoboard: botón al riel + con pull-down externa (activo en alto). Ver [gibborv2.md](gibborv2.md) |
+
+### Placas e intercambio de botones
+
+| Placa | Rama | Botón | Configuración |
+|---|---|---|---|
+| **GibborV2 prototype** (protoboard) | `GibborV2prototype` | GPIO3, activo en alto | [gibborv2.md](gibborv2.md) |
+| **GIO MK2 prototype** (carcasa dorada) | `GIO-MK2-prototype` | GPIO4, activo en bajo | [gio_mk2.md](gio_mk2.md) |
+
+Las dos usan **el mismo firmware y la misma app**: anuncian el mismo nombre (`GIBBOR_ESP32`) y el mismo
+servicio NUS, y el firmware detecta solo el pin y la polaridad del botón. Para cambiar de botón basta con
+desconectar una placa y conectar la otra (cada una ya tiene el firmware): la app la encuentra por el
+servicio, no por la MAC. Si las dos están encendidas a la vez, la app se conecta a la primera que encuentre.
 | LED de estado | GPIO8 | Activo en bajo (SuperMini). Destello cada 2 s = anunciando · fijo = app escuchando · parpadeo rápido = pánico enviado |
 
 Cambiar pines: `-DBUTTON_PIN=…`, `-DBUTTON2_PIN=…`, `-DBOOT_PIN=…`, `-DLED_PIN=…`, `-DLED_ACTIVE_LOW=0` (o editar los `#define`).

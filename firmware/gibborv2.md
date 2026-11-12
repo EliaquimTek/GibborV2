@@ -31,15 +31,21 @@ Pines de la SuperMini del lado del USB, empezando por el más cercano al conecto
 Medición `SCAN` en reposo: `GPIO3 up=0 down=0` (lo jala a GND la pull-down externa), los demás pines libres.
 Es decir, el botón es **activo en ALTO**: GPIO3 está en 0 V y sube al presionar.
 
-### ⚠️ Problema: el riel + está a 5 V
+### ⚠️ Riesgo conocido: el riel + está a 5 V
 
 Con el cable rojo en **5V**, cada pulsación mete 5 V directo a GPIO3. La ESP32-C3 aguanta como máximo
-~3.6 V en sus pines: puede dañar el pin o el chip. **No presionar el botón hasta corregirlo.**
+~3.6 V en sus pines (los diodos de protección conducen y suben el riel de 3.3 V), así que puede dañar el
+pin o el chip con el uso. **Ningún cambio de firmware o de la app puede bajar ese voltaje**: el firmware
+solo lee el pin.
 
-**Corrección:** mover el cable rojo del pin 5V (el más cercano al USB) al pin **3.3** (el tercero,
-después de G). Lo demás se queda igual.
+Decisión del usuario (2026-11-12): **se deja el cableado así**, bajo su riesgo, y el firmware lo lee tal
+cual (GPIO3 activo en alto). Si la placa empieza a reiniciarse al presionar (`reset=BROWNOUT`/`POWERON`
+en `INFO`) o GPIO3 deja de cambiar en `STATUS`, el pin ya se dañó.
 
-## Cableado correcto (cualquiera de los dos sirve, sin reflashear)
+**Corrección recomendada (un solo cable):** mover el cable rojo del pin 5V (el más cercano al USB) al
+pin **3.3** (el tercero, después de G). Lo demás se queda igual y no hay que reflashear.
+
+## Cableado seguro (cualquiera de los dos sirve, sin reflashear)
 
 | Opción | Conexión | Polaridad |
 |---|---|---|
