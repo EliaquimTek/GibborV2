@@ -44,6 +44,12 @@ object ProtectionHub {
     fun update(transform: (ProtectionState) -> ProtectionState) = _state.update(transform)
 
     fun log(message: String) {
+        // También a logcat (adb logcat -s GIBBOR) para diagnosticar con la app cerrada
+        try {
+            android.util.Log.i("GIBBOR", message)
+        } catch (_: RuntimeException) {
+            // Tests JVM sin Android
+        }
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         _log.update { (it + "[$time] $message\n").takeLast(MAX_LOG_CHARS) }
     }

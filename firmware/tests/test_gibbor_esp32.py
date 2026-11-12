@@ -63,6 +63,12 @@ class Dev:
 
     def close(self):
         if self.ser:
+            # Bajar RTS antes que DTR: el estado RTS=1/DTR=0 reinicia el ESP32-C3 (USB-Serial/JTAG)
+            try:
+                self.ser.rts = False
+                self.ser.dtr = False
+            except serial.SerialException:
+                pass
             self.ser.close()
             self.ser = None
 

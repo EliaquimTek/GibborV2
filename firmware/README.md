@@ -6,13 +6,27 @@ Botón de pánico Bluetooth LE para la app GIBBOR. Al presionarlo envía
 
 ## Hardware
 
+Placa: **ESP32-C3 SuperMini** (V1601) dentro de la carcasa impresa, con un pulsador rojo externo.
+
 | Señal | Pin | Notas |
 |---|---|---|
-| Botón | **GPIO9** (botón BOOT de la placa) | `INPUT_PULLUP`, activo en bajo. Para un botón externo conéctalo entre el pin y GND. |
+| Botón rojo (externo) | **GPIO4** | `INPUT_PULLUP`, activo en bajo. **Una pata a GPIO4 y la otra a GND. Nunca a 3.3 V.** |
+| Botón BOOT de la placa | GPIO9 | También dispara el pánico (útil para pruebas) |
 | LED de estado | GPIO8 | Activo en bajo (SuperMini). Destello cada 2 s = anunciando · fijo = app escuchando · parpadeo rápido = pánico enviado |
 
-Cambiar pines: `-DBUTTON_PIN=…`, `-DLED_PIN=…`, `-DLED_ACTIVE_LOW=0` (o editar los `#define`).
+Cambiar pines: `-DBUTTON_PIN=…`, `-DBOOT_PIN=…`, `-DLED_PIN=…`, `-DLED_ACTIVE_LOW=0` (o editar los `#define`).
 No mantengas presionado GPIO9 al conectar la placa: es pin de arranque y entraría en modo descarga.
+
+### Problema de hardware encontrado (2026-11-11)
+
+`SCAN` mostró que **GPIO4 lee GND todo el tiempo** (`up=0 down=0`), con o sin presionar el botón. En la
+placa, los pads **G, 3.3 y 4** están cubiertos por una mancha de estaño, así que GPIO4 está en corto con GND
+y el botón no puede cambiar el nivel del pin. Si la otra pata del botón va a 3.3 V, cada pulsación hace un
+corto 3.3 V → GND, lo que explica los reinicios `reset=POWERON` observados.
+
+Arreglo: retirar el estaño entre los pads con malla desoldadora y dejar el botón entre **GPIO4 y GND**
+(un pad G limpio). Al arrancar, el firmware avisa por Serial si un botón está en GND
+(`AVISO: BOTON (GPIO4) esta en GND al arrancar`), y `STATUS` muestra `btn4=` (1 = suelto, 0 = presionado).
 
 ## Compilar y flashear
 
@@ -56,6 +70,10 @@ Comportamiento:
 | `TRIGGER` | Simula una pulsación (misma función `firePanic()` que el botón) |
 | `SIMMTU <n>` | Solo Serial, para pruebas: simula un MTU pequeño. `SIMMTU 0` lo desactiva |
 | `DROP` | Solo Serial, para pruebas: corta la conexión BLE como si el teléfono se alejara |
+| `SCAN <s>` | Solo Serial: durante `<s>` segundos lee GPIO 0–10, 20 y 21 con pull-up y pull-down y reporta qué pin cambia al presionar (`1/0` libre, `0/0` a GND, `1/1` a 3.3 V). Sirve para ubicar un botón externo o un corto |
+
+`INFO` incluye `reset=` con el motivo del último reinicio: `POWERON` (corte de alimentación),
+`BROWNOUT` (voltaje bajo), `PANIC`/`*_WDT` (falla de firmware), `USB` (reinicio pedido por la PC).
 | `HELP` | Lista de comandos |
 
 Ninguna respuesta contiene `GIBBOR_PANIC_TRIGGER` ni `Boton`, así que la app no las confunde con un pánico.
