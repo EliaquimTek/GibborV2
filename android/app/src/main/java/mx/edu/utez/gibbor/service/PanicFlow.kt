@@ -11,6 +11,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import mx.edu.utez.gibbor.core.util.HashUtils
 import mx.edu.utez.gibbor.data.contacts.EmergencyContactStore
@@ -53,7 +55,13 @@ class PanicFlow(
         /** La grabación se detiene sola para no llenar el almacenamiento. */
         const val MAX_RECORDING_MS = 10 * 60_000L
         private const val LOCATION_TIMEOUT_MS = 20_000L
+        private const val ANCHOR_ATTEMPTS = 3
+        private const val ANCHOR_RETRY_MS = 3_000L
+        private const val MAX_ERROR_LOG = 300
     }
+
+    /** Serializa los anclajes de evidencia (ver [anchor]). */
+    private val anchorLock = Mutex()
 
     private val buildDraft = BuildIncidentDraftUseCase()
     private val location = LocationDataSource(context)
@@ -318,14 +326,28 @@ class PanicFlow(
                     log("${mediaType.uppercase()}: Incident not on-chain; evidence kept on the phone only.")
                     return@launch
                 }
-                log("${mediaType.uppercase()}: Anchoring hash on blockchain...")
-                val result = incidentRepository.sendEvidence(backendUrl, email, id, mediaType, hash)
-                when {
-                    result.exceptionMessage != null -> log("EVIDENCE [$mediaType] EXCEPTION: ${result.exceptionMessage}")
-                    result.success -> log("EVIDENCE [$mediaType]: TX=${result.txHash}")
-                    else -> log("EVIDENCE [$mediaType] ERROR: ${result.error}")
+                // Un anclaje a la vez: audio y video escriben en la misma entrada del
+                // contrato. Si van en paralelo, la segunda TX se simula antes de que la
+                // primera aterrice y Soroban la revierte (scecExceededLimit).
+                val ok = anchorLock.withLock {
+                    var success = false
+                    for (attempt in 1..ANCHOR_ATTEMPTS) {
+                        log("${mediaType.uppercase()}: Anchoring hash on blockchain (attempt $attempt/$ANCHOR_ATTEMPTS)...")
+                        val result = incidentRepository.sendEvidence(backendUrl, email, id, mediaType, hash)
+                        when {
+                            result.exceptionMessage != null -> log("EVIDENCE [$mediaType] EXCEPTION: ${result.exceptionMessage}")
+                            result.success -> log("EVIDENCE [$mediaType]: TX=${result.txHash}")
+                            else -> log("EVIDENCE [$mediaType] ERROR: ${result.error.take(MAX_ERROR_LOG)}")
+                        }
+                        if (result.success) {
+                            success = true
+                            break
+                        }
+                        if (attempt < ANCHOR_ATTEMPTS) delay(ANCHOR_RETRY_MS * attempt)
+                    }
+                    success
                 }
-                log(if (result.success) "${mediaType.uppercase()}: Hash anchored on blockchain" else "${mediaType.uppercase()}: Error anchoring hash on blockchain")
+                log(if (ok) "${mediaType.uppercase()}: Hash anchored on blockchain" else "${mediaType.uppercase()}: Error anchoring hash on blockchain")
             } finally {
                 pendingAnchors--
                 onSessionChanged()
