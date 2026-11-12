@@ -22,4 +22,11 @@ class BuildEmergencySmsUseCase {
         return "ALERTA GIBBOR: $sender pidio ayuda a las $time. " +
             "Ubicacion: https://maps.google.com/?q=$lat,$lon"
     }
+
+    companion object {
+        /** SMS de prueba desde Ajustes: deja claro que NO es una emergencia. */
+        fun testMessage(sender: String): String =
+            "PRUEBA GIBBOR: $sender te agrego como contacto de emergencia. " +
+                "Esto es solo una prueba, no es una emergencia."
+    }
 }
