@@ -12,6 +12,7 @@ Placa: **ESP32-C3 SuperMini** (V1601) dentro de la carcasa impresa, con un pulsa
 |---|---|---|
 | Botón rojo (externo) | **GPIO4** | `INPUT_PULLUP`, activo en bajo. **Una pata a GPIO4 y la otra a GND. Nunca a 3.3 V.** |
 | Botón BOOT de la placa | GPIO9 | También dispara el pánico (útil para pruebas) |
+| Botón alternativo | GPIO10 | Pad libre (no es pin de arranque) para resoldar el botón rojo entre GPIO10 y GND sin reflashear |
 | LED de estado | GPIO8 | Activo en bajo (SuperMini). Destello cada 2 s = anunciando · fijo = app escuchando · parpadeo rápido = pánico enviado |
 
 Cambiar pines: `-DBUTTON_PIN=…`, `-DBOOT_PIN=…`, `-DLED_PIN=…`, `-DLED_ACTIVE_LOW=0` (o editar los `#define`).

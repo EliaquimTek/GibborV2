@@ -43,6 +43,11 @@
 #ifndef BOOT_PIN
 #define BOOT_PIN 9
 #endif
+//   ALT_BUTTON_PIN: pad libre alternativo para resoldar el botón (GPIO10 + GND)
+//                   si el pad 4 queda dañado.
+#ifndef ALT_BUTTON_PIN
+#define ALT_BUTTON_PIN 10
+#endif
 
 // LED de estado: GPIO8 en la SuperMini (activo en bajo).
 #ifndef LED_PIN
@@ -83,6 +88,7 @@ struct Button {
 static Button gButtons[] = {
     {BUTTON_PIN, "BOTON", HIGH, HIGH, 0},
     {BOOT_PIN, "BOOT", HIGH, HIGH, 0},
+    {ALT_BUTTON_PIN, "BOTON_ALT", HIGH, HIGH, 0},
 };
 static const int BUTTON_COUNT = sizeof(gButtons) / sizeof(gButtons[0]);
 
@@ -243,7 +249,7 @@ static void handleCommand(String cmd, bool viaBle) {
     reply("PONG", viaBle);
   } else if (cmd == "INFO") {
     reply(String("INFO name=" DEVICE_NAME " fw=" FW_VERSION " mac=") + macString() +
-              " btn=GPIO" + BUTTON_PIN + "+GPIO" + BOOT_PIN + " uptime_s=" + (millis() / 1000) + " reset=" + resetReasonName(),
+              " btn=GPIO" + BUTTON_PIN + "+GPIO" + BOOT_PIN + "+GPIO" + ALT_BUTTON_PIN + " uptime_s=" + (millis() / 1000) + " reset=" + resetReasonName(),
           viaBle);
   } else if (cmd == "STATUS") {
     if (gConnected) chunkSize(); // refresca gMtu con el MTU real del enlace
@@ -253,7 +259,8 @@ static void handleCommand(String cmd, bool viaBle) {
               " pending=" + (gPendingTrigger ? 1 : 0) +
               " mtu=" + gMtu +
               " btn" + BUTTON_PIN + "=" + digitalRead(BUTTON_PIN) +
-              " btn" + BOOT_PIN + "=" + digitalRead(BOOT_PIN),
+              " btn" + BOOT_PIN + "=" + digitalRead(BOOT_PIN) +
+              " btn" + ALT_BUTTON_PIN + "=" + digitalRead(ALT_BUTTON_PIN),
           viaBle);
   } else if (cmd == "TRIGGER") {
     firePanic(viaBle ? "BLE" : "SERIAL");
@@ -411,8 +418,8 @@ void setup() {
     }
   }
   setupBle();
-  Serial.printf("[GIBBOR] MAC %s, botones en GPIO%d y GPIO%d (BOOT), LED en GPIO%d\n",
-                macString().c_str(), BUTTON_PIN, BOOT_PIN, LED_PIN);
+  Serial.printf("[GIBBOR] MAC %s, botones en GPIO%d, GPIO%d (BOOT) y GPIO%d, LED en GPIO%d\n",
+                macString().c_str(), BUTTON_PIN, BOOT_PIN, ALT_BUTTON_PIN, LED_PIN);
 }
 
 void loop() {
