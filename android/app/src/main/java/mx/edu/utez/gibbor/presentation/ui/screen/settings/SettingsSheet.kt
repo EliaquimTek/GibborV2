@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.VerifiedUser
@@ -65,6 +66,8 @@ fun SettingsSheet(
     smsPermissionGranted: Boolean,
     authStatus: String,
     onDismiss: () -> Unit,
+    onSendTestSms: (() -> Unit)? = null,
+    testSmsStatus: String = "",
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
 ) {
     ModalBottomSheet(
@@ -82,6 +85,8 @@ fun SettingsSheet(
             onEmergencyContactsChange = onEmergencyContactsChange,
             smsPermissionGranted = smsPermissionGranted,
             authStatus = authStatus,
+            onSendTestSms = onSendTestSms,
+            testSmsStatus = testSmsStatus,
         )
     }
 }
@@ -98,6 +103,8 @@ fun SettingsContent(
     smsPermissionGranted: Boolean,
     authStatus: String,
     modifier: Modifier = Modifier,
+    onSendTestSms: (() -> Unit)? = null,
+    testSmsStatus: String = "",
 ) {
     val device = deviceConnection(controller.statusText, controller.isConnecting)
     Column(
@@ -164,6 +171,17 @@ fun SettingsContent(
                 supporting = "Al activar la alerta se envía tu ubicación por SMS",
                 onClick = if (smsPermissionGranted) null else ({ controller.requestSmsPermission() }),
             )
+            if (onSendTestSms != null) {
+                InsetDivider()
+                SettingsItem(
+                    icon = Icons.AutoMirrored.Rounded.Send,
+                    title = "Enviar SMS de prueba",
+                    supporting = testSmsStatus.ifBlank {
+                        "Manda un mensaje que dice que es PRUEBA a tus contactos y muestra si llegó"
+                    },
+                    onClick = if (smsPermissionGranted && validContactCount > 0) onSendTestSms else null,
+                )
+            }
         }
 
         Section("Servidor") {

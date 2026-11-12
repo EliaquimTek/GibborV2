@@ -66,7 +66,7 @@ class PanicFlow(
     private val buildDraft = BuildIncidentDraftUseCase()
     private val location = LocationDataSource(context)
     private val contacts = EmergencyContactStore(context)
-    private val sendSms = SendEmergencySmsUseCase(SmsSender(context))
+    private val sendSms = SendEmergencySmsUseCase(SmsSender(context) { log(it) })
     private val audio = AudioEvidenceRecorder(context)
     private val video = VideoEvidenceRecorder(context, lifecycleOwner)
 
@@ -178,7 +178,7 @@ class PanicFlow(
             EmergencySmsResult.MissingPermission -> log("$source -> SMS: missing SEND_SMS permission")
             is EmergencySmsResult.Sent -> {
                 result.errors.forEach { log("$source -> SMS ERROR $it") }
-                log("$source -> SMS: sent to ${result.sent}/${result.total} contacts")
+                log("$source -> SMS: handed to Android for ${result.sent}/${result.total} contacts (waiting for network confirmation)")
             }
         }
     }

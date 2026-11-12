@@ -320,6 +320,8 @@ fun AppScreen(controller: MainScreenController, smsViewModel: EmergencySmsViewMo
                 smsPermissionGranted = smsViewModel.smsPermissionGranted,
                 authStatus = authStatus,
                 onDismiss = { showSettings = false },
+                onSendTestSms = { smsViewModel.sendTestSms(controller.authenticatedEmail) },
+                testSmsStatus = smsViewModel.testSmsStatus,
             )
         }
     }
