@@ -30,7 +30,7 @@
 #include <esp_system.h>
 
 // ─── Configuración ────────────────────────────────────────────────────────
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 #define DEVICE_NAME "GIBBOR_ESP32"
 
 // Botones (activos en bajo, con pull-up interno). Cualquiera dispara el pánico:
@@ -47,6 +47,11 @@
 //                   si el pad 4 queda dañado.
 #ifndef ALT_BUTTON_PIN
 #define ALT_BUTTON_PIN 10
+#endif
+//   BUTTON2_PIN: placa B (GibborV2 en protoboard): botón rojo entre el riel de 3.3 V
+//                y GPIO3, con resistencia pull-down a GND → activo en ALTO.
+#ifndef BUTTON2_PIN
+#define BUTTON2_PIN 3
 #endif
 
 // LED de estado: GPIO8 en la SuperMini (activo en bajo).
@@ -78,17 +83,30 @@ static uint32_t gLastTriggerMs = 0;
 static bool gPendingTrigger = false;
 static uint32_t gPendingSinceMs = 0;
 
+// Polaridad de los botones externos:
+//   -1 = automática (al arrancar): si el pin lee GND aun con el pull-up interno
+//        activo, hay una resistencia pull-down externa → botón a 3.3 V, activo en ALTO.
+//        En otro caso → botón a GND, activo en BAJO.
+//    0 = forzar activo en BAJO (botón entre GPIO y GND)
+//    1 = forzar activo en ALTO (botón entre GPIO y 3.3 V, con pull-down)
+#ifndef BUTTON_ACTIVE_HIGH
+#define BUTTON_ACTIVE_HIGH -1
+#endif
+
 struct Button {
   int pin;
   const char *name;
+  bool external;    // BOOT siempre es activo en bajo; los externos pueden ir a 3.3 V
+  int pressedLevel; // LOW o HIGH, se decide en configureButtons()
   int stable;
   int lastRead;
   uint32_t changedMs;
 };
 static Button gButtons[] = {
-    {BUTTON_PIN, "BOTON", HIGH, HIGH, 0},
-    {BOOT_PIN, "BOOT", HIGH, HIGH, 0},
-    {ALT_BUTTON_PIN, "BOTON_ALT", HIGH, HIGH, 0},
+    {BUTTON_PIN, "BOTON", true, LOW, HIGH, HIGH, 0},
+    {BUTTON2_PIN, "BOTON_B", true, LOW, HIGH, HIGH, 0},
+    {BOOT_PIN, "BOOT", false, LOW, HIGH, HIGH, 0},
+    {ALT_BUTTON_PIN, "BOTON_ALT", true, LOW, HIGH, HIGH, 0},
 };
 static const int BUTTON_COUNT = sizeof(gButtons) / sizeof(gButtons[0]);
 
@@ -203,6 +221,67 @@ static void flushPendingTrigger() {
 static const int SCAN_PINS[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21};
 static const int SCAN_N = sizeof(SCAN_PINS) / sizeof(SCAN_PINS[0]);
 
+static void applyButtonPull(const Button &b) {
+  pinMode(b.pin, b.pressedLevel == HIGH ? INPUT_PULLDOWN : INPUT_PULLUP);
+}
+
+static const char *polarityName(const Button &b) {
+  return b.pressedLevel == HIGH ? "alto" : "bajo";
+}
+
+// Decide la polaridad de cada botón y deja el pull interno correcto.
+static void configureButtons() {
+  for (int i = 0; i < BUTTON_COUNT; i++) {
+    Button &b = gButtons[i];
+    int level = LOW;
+    if (b.external && BUTTON_ACTIVE_HIGH == 1) {
+      level = HIGH;
+    } else if (b.external && BUTTON_ACTIVE_HIGH == -1) {
+      pinMode(b.pin, INPUT_PULLUP);
+      delay(3);
+      int up = digitalRead(b.pin);
+      pinMode(b.pin, INPUT_PULLDOWN);
+      delay(3);
+      int down = digitalRead(b.pin);
+      // up=0 y down=0: algo externo jala el pin a GND más fuerte que el pull-up
+      // interno (~45 kΩ): una pull-down de un botón a 3.3 V
+      if (up == LOW && down == LOW) level = HIGH;
+      Serial.printf("[GIBBOR] %s (GPIO%d) deteccion up=%d down=%d -> activo en %s\n", b.name, b.pin, up,
+                    down, level == HIGH ? "ALTO (boton a 3.3V + pull-down)" : "BAJO (boton a GND)");
+    }
+    b.pressedLevel = level;
+    applyButtonPull(b);
+  }
+  delay(3);
+  for (int i = 0; i < BUTTON_COUNT; i++) {
+    Button &b = gButtons[i];
+    b.stable = b.lastRead = digitalRead(b.pin);
+    b.changedMs = millis();
+    if (b.stable == b.pressedLevel) {
+      Serial.printf("[GIBBOR] AVISO: %s (GPIO%d) se lee presionado al arrancar: atorado o en corto\n", b.name,
+                    b.pin);
+    }
+  }
+}
+
+static String buttonPinsInfo() {
+  String s;
+  for (int i = 0; i < BUTTON_COUNT; i++) {
+    if (i) s += "+";
+    s += String("GPIO") + gButtons[i].pin + "(" + polarityName(gButtons[i]) + ")";
+  }
+  return s;
+}
+
+static String buttonStates() {
+  String s;
+  for (int i = 0; i < BUTTON_COUNT; i++) {
+    const Button &b = gButtons[i];
+    s += String(" btn") + b.pin + "=" + (digitalRead(b.pin) == b.pressedLevel ? "ON" : "off");
+  }
+  return s;
+}
+
 static void scanSample(int up[], int down[]) {
   for (int i = 0; i < SCAN_N; i++) pinMode(SCAN_PINS[i], INPUT_PULLUP);
   delay(2);
@@ -234,7 +313,7 @@ static void pinScan(uint32_t seconds) {
   }
   // Restaurar la configuración normal
   for (int i = 0; i < SCAN_N; i++) pinMode(SCAN_PINS[i], INPUT);
-  for (int b = 0; b < BUTTON_COUNT; b++) pinMode(gButtons[b].pin, INPUT_PULLUP);
+  for (int b = 0; b < BUTTON_COUNT; b++) applyButtonPull(gButtons[b]);
   pinMode(LED_PIN, OUTPUT);
   Serial.println("SCAN fin");
 }
@@ -249,7 +328,7 @@ static void handleCommand(String cmd, bool viaBle) {
     reply("PONG", viaBle);
   } else if (cmd == "INFO") {
     reply(String("INFO name=" DEVICE_NAME " fw=" FW_VERSION " mac=") + macString() +
-              " btn=GPIO" + BUTTON_PIN + "+GPIO" + BOOT_PIN + "+GPIO" + ALT_BUTTON_PIN + " uptime_s=" + (millis() / 1000) + " reset=" + resetReasonName(),
+              " btn=" + buttonPinsInfo() + " uptime_s=" + (millis() / 1000) + " reset=" + resetReasonName(),
           viaBle);
   } else if (cmd == "STATUS") {
     if (gConnected) chunkSize(); // refresca gMtu con el MTU real del enlace
@@ -257,10 +336,7 @@ static void handleCommand(String cmd, bool viaBle) {
               " subscribed=" + (gSubscribed ? 1 : 0) +
               " triggers=" + gTriggerCount +
               " pending=" + (gPendingTrigger ? 1 : 0) +
-              " mtu=" + gMtu +
-              " btn" + BUTTON_PIN + "=" + digitalRead(BUTTON_PIN) +
-              " btn" + BOOT_PIN + "=" + digitalRead(BOOT_PIN) +
-              " btn" + ALT_BUTTON_PIN + "=" + digitalRead(ALT_BUTTON_PIN),
+              " mtu=" + gMtu + buttonStates(),
           viaBle);
   } else if (cmd == "TRIGGER") {
     firePanic(viaBle ? "BLE" : "SERIAL");
@@ -363,8 +439,9 @@ static void pollButtons() {
     }
     if (now - b.changedMs >= DEBOUNCE_MS && r != b.stable) {
       b.stable = r;
-      Serial.printf("[GIBBOR] %s (GPIO%d) %s\n", b.name, b.pin, r == LOW ? "presionado" : "suelto");
-      if (r == LOW) firePanic(b.name);
+      bool pressed = r == b.pressedLevel;
+      Serial.printf("[GIBBOR] %s (GPIO%d) %s\n", b.name, b.pin, pressed ? "presionado" : "suelto");
+      if (pressed) firePanic(b.name);
     }
   }
 }
@@ -395,7 +472,6 @@ static void updateLed() {
 // ─── Arduino ──────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  for (int i = 0; i < BUTTON_COUNT; i++) pinMode(gButtons[i].pin, INPUT_PULLUP);
   pinMode(LED_PIN, OUTPUT);
   ledWrite(false);
 
@@ -406,20 +482,10 @@ void setup() {
   Serial.println("[GIBBOR] Boot fw " FW_VERSION " (" __DATE__ " " __TIME__ ")");
   Serial.printf("[GIBBOR] Motivo del reinicio: %s\n", resetReasonName());
 
-  delay(5); // que se estabilicen los pull-up
-  for (int i = 0; i < BUTTON_COUNT; i++) {
-    Button &b = gButtons[i];
-    b.stable = b.lastRead = digitalRead(b.pin);
-    // Un botón normalmente abierto lee HIGH en reposo. LOW al arrancar =
-    // presionado, atorado o pin en corto con GND (revisar soldaduras).
-    if (b.stable == LOW) {
-      Serial.printf("[GIBBOR] AVISO: %s (GPIO%d) esta en GND al arrancar: presionado, atorado o en corto\n",
-                    b.name, b.pin);
-    }
-  }
+  configureButtons();
   setupBle();
-  Serial.printf("[GIBBOR] MAC %s, botones en GPIO%d, GPIO%d (BOOT) y GPIO%d, LED en GPIO%d\n",
-                macString().c_str(), BUTTON_PIN, BOOT_PIN, ALT_BUTTON_PIN, LED_PIN);
+  Serial.printf("[GIBBOR] MAC %s, botones %s, LED en GPIO%d\n", macString().c_str(), buttonPinsInfo().c_str(),
+                LED_PIN);
 }
 
 void loop() {

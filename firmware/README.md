@@ -13,9 +13,16 @@ Placa: **ESP32-C3 SuperMini** (V1601) dentro de la carcasa impresa, con un pulsa
 | Botón rojo (externo) | **GPIO4** | `INPUT_PULLUP`, activo en bajo. **Una pata a GPIO4 y la otra a GND. Nunca a 3.3 V.** |
 | Botón BOOT de la placa | GPIO9 | También dispara el pánico (útil para pruebas) |
 | Botón alternativo | GPIO10 | Pad libre (no es pin de arranque) para resoldar el botón rojo entre GPIO10 y GND sin reflashear |
+| Botón de la placa B | GPIO3 | Protoboard: botón a 3.3 V con pull-down externa (activo en alto). Ver [gibborv2.md](gibborv2.md) |
 | LED de estado | GPIO8 | Activo en bajo (SuperMini). Destello cada 2 s = anunciando · fijo = app escuchando · parpadeo rápido = pánico enviado |
 
-Cambiar pines: `-DBUTTON_PIN=…`, `-DBOOT_PIN=…`, `-DLED_PIN=…`, `-DLED_ACTIVE_LOW=0` (o editar los `#define`).
+Cambiar pines: `-DBUTTON_PIN=…`, `-DBUTTON2_PIN=…`, `-DBOOT_PIN=…`, `-DLED_PIN=…`, `-DLED_ACTIVE_LOW=0` (o editar los `#define`).
+
+**Polaridad automática (fw 1.2.0):** al arrancar, cada botón externo (GPIO4, GPIO3, GPIO10) se mide con
+pull-up y pull-down. Si lee GND aun con el pull-up activo, hay una resistencia pull-down externa y el
+botón se trata como **activo en alto** (botón a 3.3 V). Si no, **activo en bajo** (botón a GND).
+`-DBUTTON_ACTIVE_HIGH=0|1` la fuerza. No presiones el botón mientras la placa arranca.
+Nunca conectes un botón a **5V**: los GPIO del C3 aguantan ~3.6 V.
 No mantengas presionado GPIO9 al conectar la placa: es pin de arranque y entraría en modo descarga.
 
 ### Problema de hardware encontrado (2026-11-11)
@@ -66,8 +73,8 @@ Comportamiento:
 | Comando | Respuesta |
 |---|---|
 | `PING` | `PONG` |
-| `INFO` | `INFO name=GIBBOR_ESP32 fw=1.0.0 mac=… btn=GPIO9 uptime_s=…` |
-| `STATUS` | `STATUS connected=… subscribed=… triggers=… pending=… mtu=…` |
+| `INFO` | `INFO name=GIBBOR_ESP32 fw=1.2.0 mac=… btn=GPIO4(bajo)+GPIO3(alto)+GPIO9(bajo)+GPIO10(bajo) uptime_s=… reset=…` |
+| `STATUS` | `STATUS connected=… subscribed=… triggers=… pending=… mtu=… btn4=off btn3=off btn9=off btn10=off` (`ON` = presionado) |
 | `TRIGGER` | Simula una pulsación (misma función `firePanic()` que el botón) |
 | `SIMMTU <n>` | Solo Serial, para pruebas: simula un MTU pequeño. `SIMMTU 0` lo desactiva |
 | `DROP` | Solo Serial, para pruebas: corta la conexión BLE como si el teléfono se alejara |
