@@ -1,5 +1,8 @@
 # Firmware GIBBOR — botón físico ESP32-C3
 
+> **Rama `GIO-MK2-prototype`**: configuración de la placa **GIO MK2 prototype** (carcasa dorada,
+> MAC `14:63:93:91:8e:86`, COM15, botón en **GPIO4** activo en bajo). Detalle en [gio_mk2.md](gio_mk2.md).
+
 Botón de pánico Bluetooth LE para la app GIBBOR. Al presionarlo envía
 `GIBBOR_PANIC_TRIGGER #<n>` por el servicio Nordic UART; la app
 (`Esp32BleClient.kt`) lo detecta y arranca el flujo de incidente + grabación.
