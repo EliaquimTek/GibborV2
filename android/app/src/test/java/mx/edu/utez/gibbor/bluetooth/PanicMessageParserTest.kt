@@ -50,4 +50,12 @@ class PanicMessageParserTest {
         val lines = PanicMessageParser.lines("PONG\r\nGIBBOR_PANIC_TRIGGER #2\n\n".toByteArray())
         assertEquals(listOf("PONG", "GIBBOR_PANIC_TRIGGER #2"), lines)
     }
+
+    @Test
+    fun `4 clicks se reconocen como detener y no como pánico`() {
+        val line = "GIBBOR_STOP_RECORDING #1"
+        assertTrue(PanicMessageParser.isStop(line))
+        assertFalse(PanicMessageParser.isTrigger(line))
+        assertFalse(PanicMessageParser.isStop("GIBBOR_PANIC_TRIGGER #4"))
+    }
 }

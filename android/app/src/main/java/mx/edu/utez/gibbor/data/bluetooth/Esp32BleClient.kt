@@ -42,6 +42,8 @@ class Esp32BleClient(
         fun onStatus(status: String)
         fun onTrigger(line: String)
         fun onConnectionChanged(connected: Boolean) {}
+        /** El botón recibió 4 clicks rápidos: detener la grabación. */
+        fun onStopRecording() {}
     }
 
     companion object {
@@ -383,7 +385,10 @@ class Esp32BleClient(
         PanicMessageParser.lines(value).forEach { line ->
             postToMain {
                 log("RX -> $line")
-                if (PanicMessageParser.isTrigger(line)) {
+                if (PanicMessageParser.isStop(line)) {
+                    log("⏹ Detener grabación (4 clicks).")
+                    callbacks.onStopRecording()
+                } else if (PanicMessageParser.isTrigger(line)) {
                     log(if (PanicMessageParser.isDeferred(line)) "🚨 Trigger detectado (diferido)." else "🚨 Trigger detectado.")
                     callbacks.onTrigger(line)
                 }
