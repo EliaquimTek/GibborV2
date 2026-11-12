@@ -72,6 +72,10 @@ En Arduino IDE: placa **ESP32C3 Dev Module**, **USB CDC On Boot: Enabled**. Moni
 | RX write (app→ESP) | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` |
 
 Comportamiento:
+- **Clicks (fw 1.3.0)**: cada pulsación espera **0.8 s** por si vienen más.
+  - **1 a 3 clicks** → `GIBBOR_PANIC_TRIGGER #n` (la alerta sale ~0.8 s después del último click).
+  - **4 clicks rápidos** → `GIBBOR_STOP_RECORDING #n`: la app detiene audio y video, sin alerta.
+    Los clicks extra de los 2 s siguientes se ignoran (un 5.º click no abre otra alerta).
 - **Antirrebote** 50 ms y **cooldown** 1.5 s entre pánicos (evita dobles disparos).
 - **Pánico sin conexión**: se guarda y se entrega al suscribirse la app si ocurrió hace < 5 min,
   como `GIBBOR_PANIC_TRIGGER #n (diferido)`. La app reconecta sola (espera máx. 30 s entre
@@ -87,7 +91,8 @@ Comportamiento:
 | `PING` | `PONG` |
 | `INFO` | `INFO name=GIBBOR_ESP32 fw=1.2.0 mac=… btn=GPIO4(bajo)+GPIO3(alto)+GPIO9(bajo)+GPIO10(bajo) uptime_s=… reset=…` |
 | `STATUS` | `STATUS connected=… subscribed=… triggers=… pending=… mtu=… btn4=off btn3=off btn9=off btn10=off` (`ON` = presionado) |
-| `TRIGGER` | Simula una pulsación (misma función `firePanic()` que el botón) |
+| `TRIGGER` | Pánico inmediato (`firePanic()`), sin esperar clicks |
+| `PRESS` | Simula una pulsación física: pasa por el detector de 1 / 4 clicks |
 | `SIMMTU <n>` | Solo Serial, para pruebas: simula un MTU pequeño. `SIMMTU 0` lo desactiva |
 | `DROP` | Solo Serial, para pruebas: corta la conexión BLE como si el teléfono se alejara |
 | `SCAN <s>` | Solo Serial: durante `<s>` segundos lee GPIO 0–10, 20 y 21 con pull-up y pull-down y reporta qué pin cambia al presionar (`1/0` libre, `0/0` a GND, `1/1` a 3.3 V). Sirve para ubicar un botón externo o un corto |
