@@ -30,7 +30,7 @@
 #include <esp_system.h>
 
 // ─── Configuración ────────────────────────────────────────────────────────
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.3.0"
 #define DEVICE_NAME "GIBBOR_ESP32"
 
 // Botones (activos en bajo, con pull-up interno). Cualquiera dispara el pánico:
@@ -77,6 +77,18 @@ static BLECharacteristic *gTx = nullptr;
 static volatile bool gConnected = false;
 static volatile bool gSubscribed = false;
 static volatile bool gNeedAdvertise = false;
+
+// Clicks: una secuencia termina cuando pasan CLICK_GAP_MS sin otro click.
+static const uint32_t CLICK_GAP_MS = 800;      // también es lo que tarda en salir la alerta de 1 click
+static const uint8_t STOP_CLICKS = 4;          // clicks rápidos para detener la grabación
+static const uint32_t STOP_LOCKOUT_MS = 2000;  // tras detener, ignorar clicks extra
+static uint8_t gClickCount = 0;
+static uint32_t gLastClickMs = 0;
+static uint32_t gClickLockoutUntil = 0;
+static const char *gClickSource = "";
+static uint32_t gStopCount = 0;
+static bool gPendingStop = false;
+static uint32_t gPendingStopSinceMs = 0;
 
 static uint32_t gTriggerCount = 0;
 static uint32_t gLastTriggerMs = 0;
@@ -203,14 +215,63 @@ static void firePanic(const char *source) {
   }
 }
 
-static void flushPendingTrigger() {
-  if (!gPendingTrigger || !gSubscribed) return;
-  gPendingTrigger = false;
-  if (millis() - gPendingSinceMs > PENDING_TRIGGER_TTL_MS) {
-    Serial.println("[GIBBOR] Trigger pendiente expirado, descartado");
+// 4 clicks rápidos = detener la grabación en el teléfono (sin alerta).
+static void fireStop(const char *source) {
+  uint32_t now = millis();
+  gStopCount++;
+  gLedFlashUntil = now + 1000;
+  Serial.printf("[GIBBOR] DETENER GRABACION #%lu (origen: %s)\n", (unsigned long)gStopCount, source);
+  if (!sendLine(String("GIBBOR_STOP_RECORDING #") + gStopCount)) {
+    gPendingStop = true;
+    gPendingStopSinceMs = now;
+    Serial.println("[GIBBOR] Detener pendiente: se enviara al reconectar la app");
+  }
+}
+
+// Cada pulsación entra aquí. Se espera CLICK_GAP_MS por si vienen más clicks:
+//   1 a 3 clicks → pánico;  4 clicks → detener grabación (sin pánico).
+static void registerClick(const char *source) {
+  uint32_t now = millis();
+  if ((int32_t)(gClickLockoutUntil - now) > 0) {
+    gClickLockoutUntil = now + STOP_LOCKOUT_MS; // sigue presionando: alargar el bloqueo
+    Serial.printf("[GIBBOR] Click ignorado tras detener (%s)\n", source);
     return;
   }
-  sendLine(String("GIBBOR_PANIC_TRIGGER #") + gTriggerCount + " (diferido)");
+  gClickCount++;
+  gLastClickMs = now;
+  gClickSource = source;
+  Serial.printf("[GIBBOR] Click %u/%u (%s)\n", gClickCount, STOP_CLICKS, source);
+  if (gClickCount >= STOP_CLICKS) {
+    gClickCount = 0;
+    gClickLockoutUntil = now + STOP_LOCKOUT_MS; // un 5.º click no debe abrir una alerta nueva
+    fireStop(source);
+  }
+}
+
+static void pollClicks() {
+  if (gClickCount == 0 || millis() - gLastClickMs < CLICK_GAP_MS) return;
+  uint8_t n = gClickCount;
+  gClickCount = 0;
+  Serial.printf("[GIBBOR] Secuencia de %u click(s) -> panico\n", n);
+  firePanic(gClickSource);
+}
+
+static void flushPendingTrigger() {
+  if (!gSubscribed) return;
+  if (gPendingTrigger) {
+    gPendingTrigger = false;
+    if (millis() - gPendingSinceMs > PENDING_TRIGGER_TTL_MS) {
+      Serial.println("[GIBBOR] Trigger pendiente expirado, descartado");
+    } else {
+      sendLine(String("GIBBOR_PANIC_TRIGGER #") + gTriggerCount + " (diferido)");
+    }
+  }
+  if (gPendingStop) {
+    gPendingStop = false;
+    if (millis() - gPendingStopSinceMs <= PENDING_TRIGGER_TTL_MS) {
+      sendLine(String("GIBBOR_STOP_RECORDING #") + gStopCount + " (diferido)");
+    }
+  }
 }
 
 // ─── Diagnóstico de cableado ─────────────────────────────────────────────
@@ -336,8 +397,11 @@ static void handleCommand(String cmd, bool viaBle) {
               " subscribed=" + (gSubscribed ? 1 : 0) +
               " triggers=" + gTriggerCount +
               " pending=" + (gPendingTrigger ? 1 : 0) +
-              " mtu=" + gMtu + buttonStates(),
+              " mtu=" + gMtu + " stops=" + gStopCount + buttonStates(),
           viaBle);
+  } else if (cmd == "PRESS") {
+    // Simula una pulsación física: pasa por el detector de 1 / 4 clicks
+    registerClick(viaBle ? "BLE_PRESS" : "SERIAL_PRESS");
   } else if (cmd == "TRIGGER") {
     firePanic(viaBle ? "BLE" : "SERIAL");
   } else if (!viaBle && cmd.startsWith("SIMMTU")) {
@@ -357,7 +421,7 @@ static void handleCommand(String cmd, bool viaBle) {
     int secs = cmd.substring(4).toInt();
     pinScan(secs > 0 && secs <= 120 ? secs : 30);
   } else if (cmd == "HELP") {
-    reply("CMDS: PING INFO STATUS TRIGGER SIMMTU DROP HELP", viaBle);
+    reply("CMDS: PING INFO STATUS TRIGGER PRESS SIMMTU DROP SCAN HELP", viaBle);
   } else {
     reply(String("ERR unknown_cmd=") + cmd, viaBle);
   }
@@ -441,7 +505,7 @@ static void pollButtons() {
       b.stable = r;
       bool pressed = r == b.pressedLevel;
       Serial.printf("[GIBBOR] %s (GPIO%d) %s\n", b.name, b.pin, pressed ? "presionado" : "suelto");
-      if (pressed) firePanic(b.name);
+      if (pressed) registerClick(b.name);
     }
   }
 }
@@ -490,6 +554,7 @@ void setup() {
 
 void loop() {
   pollButtons();
+  pollClicks();
   pollSerial();
 
   if (gBleCmdReady) {

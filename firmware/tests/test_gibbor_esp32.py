@@ -34,9 +34,14 @@ def record(name, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
 
 
+def app_is_stop(line: str) -> bool:
+    """Réplica de PanicMessageParser.isStop (4 clicks rápidos)."""
+    return "gibbor_stop_recording" in line.lower()
+
+
 def app_is_trigger(line: str) -> bool:
-    """Réplica exacta del criterio de Esp32BleClient.handleIncoming."""
-    return "boton" in line.lower() or "gibbor_panic_trigger" in line.lower()
+    """Réplica exacta de PanicMessageParser.isTrigger."""
+    return not app_is_stop(line) and ("boton" in line.lower() or "gibbor_panic_trigger" in line.lower())
 
 
 def app_parse(payload: bytes):
@@ -238,6 +243,33 @@ async def ble_tests(dev: Dev):
         await asyncio.sleep(0.8)
         n = sum(1 for x in rx_lines if app_is_trigger(x))
         record("Segundo pánico tras cooldown (vía RX)", n == 2, f"{n} triggers")
+
+        # Clicks del botón (PRESS = misma ruta que una pulsación física)
+        await asyncio.sleep(1.6)  # salir del cooldown
+        rx_lines.clear(); rx_times.clear()
+        t0 = time.time()
+        dev.ser.write(b"PRESS\n")
+        l, t1 = await wait_line(app_is_trigger, timeout=3.0)
+        dt = (t1 - t0) if l else 0
+        record("1 click -> pánico tras esperar ~0.8 s por más clicks", l is not None and 0.6 < dt < 1.5, f"{dt * 1000:.0f} ms, {l}")
+
+        await asyncio.sleep(2.0)
+        rx_lines.clear(); rx_times.clear()
+        for _ in range(4):
+            dev.ser.write(b"PRESS\n")
+            await asyncio.sleep(0.2)
+        l, _ = await wait_line(app_is_stop, timeout=2.0)
+        await asyncio.sleep(1.5)  # una alerta tardía aparecería aquí
+        trig = [x for x in rx_lines if app_is_trigger(x)]
+        record("4 clicks rápidos -> GIBBOR_STOP_RECORDING", l is not None, l)
+        record("4 clicks rápidos no disparan pánico", not trig, rx_lines)
+
+        # Un 5.º click justo después se ignora (no abre una alerta nueva)
+        rx_lines.clear(); rx_times.clear()
+        dev.ser.write(b"PRESS\n")
+        await asyncio.sleep(1.5)
+        record("Click extra tras detener se ignora", not any(app_is_trigger(x) for x in rx_lines), rx_lines)
+        await asyncio.sleep(2.2)  # fin del bloqueo antes de seguir
 
         # MTU 23 (Android < 14 sin requestMtu): cada notificación lleva <= 20 bytes
         await client.write_gatt_char(NUS_RX, b"STATUS", response=True)

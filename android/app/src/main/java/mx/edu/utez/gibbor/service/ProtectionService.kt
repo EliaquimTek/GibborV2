@@ -132,6 +132,16 @@ class ProtectionService : LifecycleService() {
                 override fun onConnectionChanged(connected: Boolean) {
                     ProtectionHub.update { it.copy(isConnecting = ble.isConnecting) }
                 }
+                override fun onStopRecording() {
+                    // 4 clicks rápidos en el botón: detener audio y video (la protección sigue activa)
+                    if (ProtectionHub.state.value.isRecording) {
+                        ProtectionHub.log("ESP32 -> 4 clicks: stopping recording")
+                        panicFlow.stopRecording()
+                        stopIfIdle()
+                    } else {
+                        ProtectionHub.log("ESP32 -> 4 clicks: nothing is recording")
+                    }
+                }
             },
         )
         panicFlow = PanicFlow(
